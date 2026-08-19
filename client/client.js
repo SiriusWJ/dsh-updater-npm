@@ -55,6 +55,12 @@ window.__ModuleLoader__.load({
       starting: "正在启动更新…",
       updNote: "自动检查每 30 分钟一次（页面每 60 秒刷新缓存结果）；npm 全局模式更新执行 npm install -g @deepseek-ai/dsh@latest，完成后需重启 DSH 生效；源码树模式请用 git pull 更新。「更新说明」在新标签页打开 GitHub Releases。",
       docsTitle: "DSH 文档（官方）",
+      docsToggleLabel: "自动同步官方文档",
+      docsToggleOn: "已开启",
+      docsToggleOff: "已关闭",
+      docsToggleOnHint: "开启：首次启动与每 24 小时自动增量同步，并加载 dsh_docs_search / dsh_docs_read 工具。",
+      docsToggleOffHint: "关闭（默认）：不自动同步，文档工具不加载。",
+      docsNotEnabled: "官方文档同步未开启。打开上方开关后会自动同步并加载 dsh_docs_search / dsh_docs_read 工具。",
       docsReading: "正在读取文档状态…",
       statusFail: "状态读取失败: ",
       docsNotReady: "本地还没有官方文档，点击下方「同步官方文档」开始下载",
@@ -119,6 +125,12 @@ window.__ModuleLoader__.load({
       starting: "Starting update…",
       updNote: "Auto-checks every 30 minutes (page refreshes the cached result every 60s); npm-global mode runs npm install -g @deepseek-ai/dsh@latest, then restart DSH to apply; source-tree mode: use git pull. \"Release notes\" opens GitHub Releases in a new tab.",
       docsTitle: "DSH Docs (official)",
+      docsToggleLabel: "Auto-sync official docs",
+      docsToggleOn: "On",
+      docsToggleOff: "Off",
+      docsToggleOnHint: "On: auto-syncs on first start and every 24h (incremental), and loads the dsh_docs_search / dsh_docs_read tools.",
+      docsToggleOffHint: "Off (default): no auto sync and the doc tools are not loaded.",
+      docsNotEnabled: "Official docs sync is off. Turn on the switch above to auto-sync and load the dsh_docs_search / dsh_docs_read tools.",
       docsReading: "Reading docs status…",
       statusFail: "Status read failed: ",
       docsNotReady: "No local docs yet — click \"Sync official docs\" below to download",
@@ -431,6 +443,22 @@ window.__ModuleLoader__.load({
         var sp0 = react.useState(null)
         var syncProg = sp0[0]
         var setSyncProg = sp0[1]
+        // 文档同步开关：null=加载中 / true / false（默认关闭）
+        var en0 = react.useState(null)
+        var enabled = en0[0]
+        var setEnabled = en0[1]
+
+        var toggleEnabled = function () {
+          if (enabled === null) return
+          var next = !enabled
+          fetch("/dsh-updater-npm/docs/enabled?enabled=" + (next ? 1 : 0), { method: "POST", cache: "no-store", signal: AbortSignal.timeout(15000) })
+            .then(function (r) { return r.json() })
+            .then(function (data) {
+              setEnabled(!!(data && data.enabled))
+              if (data && data.enabled) loadStatus()
+            })
+            .catch(function () { setEnabled(enabled) }) // 失败回滚
+        }
 
         var loadStatus = function () {
           callDocsStatus().then(function (data) {
@@ -486,6 +514,10 @@ window.__ModuleLoader__.load({
 
         react.useEffect(function () {
           loadStatus()
+          fetch("/dsh-updater-npm/docs/enabled", { cache: "no-store", signal: AbortSignal.timeout(10000) })
+            .then(function (r) { return r.json() })
+            .then(function (data) { setEnabled(!!(data && data.enabled)) })
+            .catch(function () { setEnabled(false) })
           if (timer !== undefined) {
             var dispose = timer.interval(function () { loadStatus() }, 120000)
             return function () { dispose() }
@@ -499,7 +531,9 @@ window.__ModuleLoader__.load({
         }
 
         var statusLine
-        if (status.phase === "running") {
+        if (enabled === false) {
+          statusLine = el("div", { style: warnStyle }, t("docsNotEnabled"))
+        } else if (status.phase === "running") {
           statusLine = el("div", null, t("docsReading"))
         } else if (status.error) {
           statusLine = el("div", { style: errStyle }, t("statusFail") + status.error)
@@ -577,6 +611,14 @@ window.__ModuleLoader__.load({
         var d = status.data
         return el("div", { style: cardStyle },
           el("div", { style: { fontWeight: 600 } }, t("docsTitle")),
+          el("div", { style: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 2 } },
+            el("span", { style: { fontWeight: 600 } }, t("docsToggleLabel")),
+            el("button", {
+              style: enabled ? Object.assign({}, btnStyle, { borderColor: "rgba(46,125,50,.7)", background: "rgba(46,125,50,.18)", fontWeight: 600 }) : btnStyle,
+              onClick: toggleEnabled,
+              disabled: enabled === null,
+            }, enabled === null ? "…" : (enabled ? t("docsToggleOn") : t("docsToggleOff"))),
+            el("span", { style: { opacity: 0.6, fontSize: 11, flex: 1, minWidth: 180 } }, enabled ? t("docsToggleOnHint") : t("docsToggleOffHint"))),
           statusLine,
           d && d.ok && d.indexed ? el("div", null,
             row(t("syncTime"), d.syncedAt ? new Date(d.syncedAt).toLocaleString() : "—"),
@@ -584,7 +626,7 @@ window.__ModuleLoader__.load({
             row(t("docRoot"), d.root, true)) : null,
           syncLine,
           el("div", { style: { display: "flex", gap: 8, marginTop: 8, alignItems: "center", flexWrap: "wrap" } },
-            el("button", { style: primaryBtnStyle, onClick: runSync, disabled: syncState !== null && syncState.phase === "running" }, syncState !== null && syncState.phase === "running" ? t("syncingShort") : t("syncBtn")),
+            el("button", { style: primaryBtnStyle, onClick: runSync, disabled: !enabled || (syncState !== null && syncState.phase === "running") }, syncState !== null && syncState.phase === "running" ? t("syncingShort") : t("syncBtn")),
             el("button", { style: btnStyle, onClick: loadStatus }, t("refresh"))),
           el("div", { style: { display: "flex", gap: 6, marginTop: 8, alignItems: "center" } },
             el("input", {
