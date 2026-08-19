@@ -1,6 +1,6 @@
 // dsh-updater-npm —— Client 面（浏览器 bundle）
 //
-// 设置页一个合并页面（「DSH 更新」入口，图标为更新图标）：
+// 设置页一个合并页面（「DSH 更新」入口；检测到新版本时导航标签旁显示红色圆点）：
 //  上半部「DSH 更新」：自动加载检查结果，提供「通过 npm 更新」按钮。
 //  下半部「DSH 文档」：官方文档同步状态、手动同步、本地索引搜索与阅读。
 // 通过同源 HTTP 路由与宿主端通信（/dsh-updater-npm/*）。
@@ -13,7 +13,7 @@ window.__ModuleLoader__.load({
     var react = require("react")
 
     var name = "dsh-updater-npm"
-    var inject = ["slots", "timer"]
+    var inject = ["slots", "timer", "locale"]
 
     var cardStyle = {
       display: "flex", flexDirection: "column", gap: 6,
@@ -49,8 +49,25 @@ window.__ModuleLoader__.load({
     function apply(ctx) {
       var slots = ctx.get("slots")
       var timer = ctx.get("timer")
+      var locale = ctx.get("locale")
       if (slots === undefined) return
       var hasUpdate = false
+      var bumpSeq = 0
+      var bumpSalt = String(Math.random()).slice(2)
+      // 壳程序缓存设置页导航行（rows 仅在 settings.section 版本号或 locale revision
+      // 变化时才重算，标签是一次性读入的快照），所以 hasUpdate 翻转时必须触发重算，
+      // 否则导航标签上的小红点永远不会出现。做法：注册一个一次性空字典令 locale
+      // revision +1，壳程序随即重读标签 thunk，红点随之显示/消失；不重挂载卡片内容。
+      var applyHasUpdate = function (data) {
+        var nu = !!(data && data.ok && data.hasUpdate)
+        if (nu === hasUpdate) return
+        hasUpdate = nu
+        if (locale === undefined) return
+        bumpSeq += 1
+        try {
+          locale.register("dsh-updater-npm", { ["~nav" + bumpSalt + "-" + bumpSeq]: {} })
+        } catch (e) { /* 忽略（如 HMR 后字典残留导致的重复注册） */ }
+      }
 
       // ── DSH 更新卡片 ────────────────────────────────────────────────────────
       var callCheck = function () {
@@ -80,7 +97,7 @@ window.__ModuleLoader__.load({
         var setProg = prog0[1]
 
         var applyData = function (data) {
-          hasUpdate = !!(data && data.ok && data.hasUpdate)
+          applyHasUpdate(data)
         }
 
         var runCheck = function () {
@@ -419,7 +436,7 @@ window.__ModuleLoader__.load({
       // ── 注入合并后的设置页面（DSH 更新 + DSH 文档同一页）─────────────────────
       var disposeUpd = slots.inject("settings.section", function () {
         return slots.register(
-          { name: "settings.section", id: "dsh-update-local", order: 30, label: function () { return hasUpdate ? "DSH 更新 ●" : "DSH 更新" } },
+          { name: "settings.section", id: "dsh-update-local", order: 30, label: function () { return hasUpdate ? "DSH 更新 🔴" : "DSH 更新" } },
           function (props) {
             return react.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 10 } },
               react.createElement(UpdView, null),
@@ -427,6 +444,10 @@ window.__ModuleLoader__.load({
           })
       })
       ctx.effect(function () { return function () { disposeUpd() } })
+
+      // 页面加载时静默预检一次（宿主端 /check 有 10 分钟缓存），
+      // 让导航小红点在首次打开设置页时就绪，而不必先进入「DSH 更新」卡片。
+      callCheck().then(function (data) { applyHasUpdate(data) }).catch(function () { /* 静默 */ })
     }
 
     exports.name = name

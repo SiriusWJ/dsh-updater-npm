@@ -28,6 +28,7 @@ dsh plugin --profile web add github:SiriusWJ/dsh-updater-npm
 ![DSH 更新卡片](https://raw.githubusercontent.com/SiriusWJ/dsh-updater-npm/master/docs/dsh-update-card.png)
 
 - 自动检查每 30 分钟一次（页面每 60 秒刷新缓存结果）。
+- 检测到新版本时，设置页左侧导航「DSH 更新」旁会显示一个**红色小圆点**（🔴）。
 - 点击「通过 npm 更新」执行 `npm install -g @deepseek-ai/dsh@latest`，期间显示**实时进度**（npm 输出尾部），完成后提示重启 DSH 生效。
 - 版本比较为 semver 风格：本地比远端新（如 rc.7 vs rc.6）时不会误报更新。
 
