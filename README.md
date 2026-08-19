@@ -21,6 +21,10 @@ dsh plugin --profile web add github:SiriusWJ/dsh-updater-npm
 
 安装后重启 dsh web，设置页出现「DSH 更新」和「DSH 文档」两个卡片。
 
+> **多语言**：界面与宿主端消息支持**中文 / English**，自动跟随系统语言切换
+> （也可在 设置 → 通用 → Language 手动选择）；`dsh_docs_search` /
+> `dsh_docs_read` 工具描述与输出同样跟随系统语言。
+
 ## 使用
 
 ### DSH 更新
@@ -83,6 +87,11 @@ dsh plugin --profile web add github:SiriusWJ/dsh-updater-npm
 The plugin detects the **run mode**: `npm-global` (normal; npm update applies directly)
 or `source` (source-tree, e.g. `pnpm dsh web`; npm update is refused with a warning
 because it does not affect the running instance — use `git pull` instead).
+
+**i18n:** UI and host messages support **Chinese / English**, following the system
+language automatically (or the manual choice in Settings → General → Language);
+the `dsh_docs_search` / `dsh_docs_read` tool descriptions and outputs follow the
+system language too.
 
 **Install:**
 
