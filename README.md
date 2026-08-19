@@ -59,6 +59,8 @@ dsh plugin --profile web add github:SiriusWJ/dsh-updater-npm
 > 插件只更新**当前运行的这个**：优先用当前实例所属 Node 安装自带的 npm 执行（避免 PATH
 > 上的 npm 属于别的 Node 而把更新写到别处）；`/check` 会列出检测到的其他副本并显示警告；
 > 若 npm 执行成功但当前副本版本没变（更新落空），会明确报错而不是假成功。
+> 副本检测按 **realpath 去重**：指向运行实例的 junction/符号链接（如
+> `$DSH_HOME/profiles/node_modules` 里的依赖镜像）不会误报为独立副本。
 
 > 版本回退排查：若"更新后显示一致、重启后回到旧版"，说明运行的是源码树而 npm 更新只改了全局安装。切换为 npm-global 启动（如桌面快捷方式指向 `D:\tools\node22\dsh.cmd web`）后更新即生效。
 
