@@ -1,0 +1,49 @@
+{
+  "name": "dsh-updater-npm",
+  "version": "1.1.0",
+  "description": "DSH updater + official docs sync plugin for DeepSeek Harness: one-click npm update of @deepseek-ai/dsh with live progress, incremental sync of the official docs/ to local with progress, and dsh_docs_search / dsh_docs_read model tools. DSH 更新器 + 官方文档同步器（进度显示）。",
+  "type": "module",
+  "main": "lib/index.js",
+  "license": "MIT",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "updater",
+    "npm-update",
+    "docs",
+    "documentation"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SiriusWJ/dsh-updater-npm.git"
+  },
+  "homepage": "https://github.com/SiriusWJ/dsh-updater-npm#readme",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./client/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "client",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime"
+      ],
+      "platform": "web"
+    }
+  }
+}
