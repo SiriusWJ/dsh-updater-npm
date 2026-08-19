@@ -35,6 +35,12 @@ window.__ModuleLoader__.load({
       updateFail: "更新失败: ",
       hintWrap: "（{hint}）",
       mode: "运行模式",
+      updateMethod: "更新方式",
+      methodNpmOwn: "npm 全局（当前实例自带 npm）",
+      methodNpmPath: "npm 全局（PATH npm，完成后校验）",
+      methodSource: "源码树（git pull 更新）",
+      copiesWarn: "环境中检测到 {n} 个 dsh 副本，仅更新当前运行的这个，其他副本保持不变。",
+      npmMismatch: "PATH 上的 npm 与当前运行实例不属于同一 Node 安装，更新将使用当前实例自带的 npm，不会误更新其他副本。",
       localVer: "本地版本",
       remoteVer: "远端版本",
       checkedAt: "最近检查",
@@ -93,6 +99,12 @@ window.__ModuleLoader__.load({
       updateFail: "Update failed: ",
       hintWrap: "({hint})",
       mode: "Run mode",
+      updateMethod: "Update method",
+      methodNpmOwn: "npm global (running instance's own npm)",
+      methodNpmPath: "npm global (PATH npm, verified after run)",
+      methodSource: "source tree (update via git pull)",
+      copiesWarn: "Found {n} dsh copies in this environment — only the currently running one is updated; other copies stay untouched.",
+      npmMismatch: "The npm on PATH does not belong to the same Node installation as the running instance; updates use the running instance's own npm and never touch other copies.",
       localVer: "Local version",
       remoteVer: "Remote version",
       checkedAt: "Last checked",
@@ -345,7 +357,9 @@ window.__ModuleLoader__.load({
                   el("div", { style: okStyle }, t("updated", { from: update.result.beforeVersion, to: update.result.version })),
                   el("div", { style: Object.assign({ marginTop: 4 }, warnStyle) },
                     t("restartHint")))
-              : el("div", { style: okStyle }, t("noUpdate"))
+              : (update.result.warning
+                  ? el("div", { style: warnStyle }, "⚠️ " + update.result.warning)
+                  : el("div", { style: okStyle }, t("noUpdate")))
           } else {
             updateLine = el("div", { style: errStyle }, t("updateFail") + ((update.result && update.result.error) || t("unknownError")) + ((update.result && update.result.hint) ? t("hintWrap", { hint: update.result.hint }) : ""))
           }
@@ -359,11 +373,16 @@ window.__ModuleLoader__.load({
           statusLine,
           data && data.ok ? el("div", null,
             row(t("mode"), data.mode === "source" ? t("modeSource") : t("modeNpm"), true),
+            row(t("updateMethod"), data.updateMethod === "source-git-pull" ? t("methodSource") : data.updateMethod === "npm-global-own" ? t("methodNpmOwn") : t("methodNpmPath"), true),
             row(t("localVer"), data.localVersion, true),
             row(t("remoteVer"), data.remoteVersion, true),
             row(t("checkedAt"), data.checkedAt ? new Date(data.checkedAt).toLocaleTimeString() : "—")) : null,
           data && data.ok && data.sourceWarning ? el("div", { style: { marginTop: 4, fontSize: 12, color: "#b26a00" } },
             "⚠️ " + data.sourceWarning) : null,
+          data && data.ok && data.npmMismatch ? el("div", { style: { marginTop: 4, fontSize: 12, color: "#b26a00" } },
+            "⚠️ " + t("npmMismatch")) : null,
+          data && data.ok && data.copies && data.copies.length > 0 ? el("div", { style: { marginTop: 4, fontSize: 12, color: "#b26a00" } },
+            "⚠️ " + t("copiesWarn", { n: data.copies.length })) : null,
           updateLine,
           el("div", { style: { display: "flex", gap: 8, marginTop: 8, alignItems: "center", flexWrap: "wrap" } },
             el("button", { style: primaryBtnStyle, onClick: runUpdate, disabled: busy || sourceMode || !(data && data.ok && data.hasUpdate) }, sourceMode ? t("sourceUnavailable") : (busy ? t("updatingShort") : t("updateBtn"))),
