@@ -51,6 +51,11 @@ dsh plugin --profile web add github:SiriusWJ/dsh-updater-npm
 
 ## 运行模式
 
+> **Windows + 缺 PowerShell 7**：DSH 的 shell 工具依赖 `pwsh`（PowerShell 7）。
+> 若检测到 Windows 上未安装 pwsh，「DSH 更新」卡片会显示提示和**「一键安装 PowerShell 7」**按钮
+> （优先 `winget install Microsoft.PowerShell`，不可用时自动改走官方 win-x64 MSI 静默安装，
+> 带实时进度；完成后重启 DSH 生效）。
+
 插件会自动识别当前 dsh 的**运行模式**并诚实处理：
 
 | 模式 | 识别依据 | 更新方式 | 说明 |

@@ -55,6 +55,11 @@ window.__ModuleLoader__.load({
       srcUpdated: "✅ 源码树已更新: {before} → {after}",
       srcNoUpdate: "源码树已是最新",
       srcFail: "源码树更新失败: ",
+      pwshMissingHint: "未检测到 PowerShell 7（pwsh）。DSH 的 shell 工具依赖它，可一键安装。",
+      pwshInstallBtn: "一键安装 PowerShell 7",
+      pwshInstalling: "正在安装 PowerShell 7…",
+      pwshInstalled: "✅ PowerShell 7 已安装，重启 DSH 后生效",
+      pwshInstallFail: "PowerShell 7 安装失败: ",
       copiesWarn: "环境中检测到 {n} 个 dsh 副本，仅更新当前运行的这个，其他副本保持不变。",
       npmMismatch: "PATH 上的 npm 与当前运行实例不属于同一 Node 安装，更新将使用当前实例自带的 npm，不会误更新其他副本。",
       localVer: "本地版本",
@@ -141,6 +146,11 @@ window.__ModuleLoader__.load({
       srcUpdated: "✅ Source tree updated: {before} → {after}",
       srcNoUpdate: "Source tree already up to date",
       srcFail: "Source-tree update failed: ",
+      pwshMissingHint: "PowerShell 7 (pwsh) was not detected. DSH shell tools depend on it — install it with one click.",
+      pwshInstallBtn: "Install PowerShell 7",
+      pwshInstalling: "Installing PowerShell 7…",
+      pwshInstalled: "✅ PowerShell 7 installed — restart DSH to apply",
+      pwshInstallFail: "PowerShell 7 install failed: ",
       copiesWarn: "Found {n} dsh copies in this environment — only the currently running one is updated; other copies stay untouched.",
       npmMismatch: "The npm on PATH does not belong to the same Node installation as the running instance; updates use the running instance's own npm and never touch other copies.",
       localVer: "Local version",
@@ -299,6 +309,10 @@ window.__ModuleLoader__.load({
         var prog0 = react.useState(null)
         var prog = prog0[0]
         var setProg = prog0[1]
+        // PowerShell 7 一键安装状态
+        var ps0 = react.useState(null)
+        var pwshInstall = ps0[0]
+        var setPwshInstall = ps0[1]
 
         var applyData = function (data) {
           applyHasUpdate(data)
@@ -366,6 +380,28 @@ window.__ModuleLoader__.load({
               if (stopPoll) stopPoll()
               setUpdate({ phase: "done", result: { ok: false, error: String((error && error.message) || error) } })
               setProg(null)
+            })
+        }
+
+        var runInstallPwsh = function () {
+          setPwshInstall({ phase: "running", result: null, prog: null })
+          var stopPoll = null
+          if (timer !== undefined) {
+            stopPoll = timer.interval(function () {
+              callProgress().then(function (p) {
+                if (p && p.type === "install-pwsh" && p.phase !== "idle") setPwshInstall({ phase: "running", result: null, prog: p })
+              }).catch(function () { /* 静默 */ })
+            }, 1500)
+          }
+          fetch("/dsh-updater-npm/install-pwsh?uilang=" + uiLang(), { method: "POST", cache: "no-store", signal: AbortSignal.timeout(600000) })
+            .then(function (r) { return r.json() })
+            .then(function (result) {
+              if (stopPoll) stopPoll()
+              setPwshInstall({ phase: "done", result: result, prog: null })
+              runCheck()
+            }).catch(function (error) {
+              if (stopPoll) stopPoll()
+              setPwshInstall({ phase: "done", result: { ok: false, error: String((error && error.message) || error) }, prog: null })
             })
         }
 
@@ -459,6 +495,20 @@ window.__ModuleLoader__.load({
         var busy = update !== null && update.phase === "running"
         var sourceMode = !!(data && data.ok && data.mode === "source")
         var git = data && data.ok ? data.git : null
+
+        var pwshLine = null
+        if (pwshInstall !== null) {
+          if (pwshInstall.phase === "running") {
+            pwshLine = el("div", null,
+              el("div", null, pwshInstall.prog && pwshInstall.prog.message ? pwshInstall.prog.message : t("pwshInstalling")),
+              pwshInstall.prog && pwshInstall.prog.detail ? el("pre", { style: { margin: "4px 0 0", maxHeight: 90, overflow: "auto", whiteSpace: "pre-wrap", wordBreak: "break-all", fontFamily: "ui-monospace,SFMono-Regular,Menlo,Consolas,monospace", fontSize: 11, opacity: 0.75, background: "rgba(128,128,128,.08)", borderRadius: 6, padding: "6px 8px" } }, pwshInstall.prog.detail) : null)
+          } else if (pwshInstall.result && pwshInstall.result.ok) {
+            pwshLine = el("div", { style: okStyle }, t("pwshInstalled"))
+          } else {
+            pwshLine = el("div", { style: errStyle }, t("pwshInstallFail") + ((pwshInstall.result && pwshInstall.result.error) || t("unknownError")))
+          }
+        }
+
         return el("div", { style: cardStyle },
           el("div", { style: { fontWeight: 600 } }, t("updTitle")),
           statusLine,
@@ -488,6 +538,8 @@ window.__ModuleLoader__.load({
             "⚠️ " + t("npmMismatch")) : null,
           data && data.ok && data.copies && data.copies.length > 0 ? el("div", { style: { marginTop: 4, fontSize: 12, color: "#b26a00" } },
             "⚠️ " + t("copiesWarn", { n: data.copies.length })) : null,
+          data && data.ok && data.pwshInstalled === false ? el("div", { style: { marginTop: 4, fontSize: 12, color: "#b26a00" } },
+            t("pwshMissingHint")) : null,
           updateLine,
           el("div", { style: { display: "flex", gap: 8, marginTop: 8, alignItems: "center", flexWrap: "wrap" } },
             sourceMode
@@ -495,6 +547,9 @@ window.__ModuleLoader__.load({
               : el("button", { style: primaryBtnStyle, onClick: runUpdate, disabled: busy || !(data && data.ok && data.hasUpdate) }, busy ? t("updatingShort") : t("updateBtn")),
             el("button", { style: btnStyle, onClick: runNotes }, t("notesBtn")),
             el("button", { style: btnStyle, onClick: runCheck, disabled: state.phase === "running" }, state.phase === "running" ? t("checkingShort") : t("recheck"))),
+          data && data.ok && data.pwshInstalled === false ? el("div", { style: { display: "flex", gap: 8, marginTop: 8, alignItems: "center", flexWrap: "wrap" } },
+            el("button", { style: primaryBtnStyle, onClick: runInstallPwsh, disabled: pwshInstall !== null && pwshInstall.phase === "running" }, pwshInstall !== null && pwshInstall.phase === "running" ? t("pwshInstalling") : t("pwshInstallBtn")),
+            pwshLine) : null,
           el("div", { style: noteStyle }, t("updNote")))
       }
 
