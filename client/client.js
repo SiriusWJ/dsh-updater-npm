@@ -39,6 +39,22 @@ window.__ModuleLoader__.load({
       methodNpmOwn: "npm 全局（当前实例自带 npm）",
       methodNpmPath: "npm 全局（PATH npm，完成后校验）",
       methodSource: "源码树（git pull 更新）",
+      srcBranch: "分支",
+      srcLocal: "本地提交",
+      srcRemote: "远端提交",
+      srcBehind: "落后 {n} 个提交",
+      srcAhead: "领先 {n} 个提交",
+      srcUpdateAvailable: "⚠️ 有新更新可用：{from} → {to}（落后 {behind} 个提交）",
+      srcUpToDate: "✅ 源码树已是最新（{commit}）",
+      srcDirty: "⚠️ 工作区有未提交修改，请先提交或 git stash 后再更新",
+      srcGitMissing: "⚠️ 未检测到 git（未安装或不在 PATH）。请先安装 git 以使用源码树更新。",
+      srcNotRepo: "⚠️ 当前目录不是 git 仓库，无法执行源码树更新。",
+      srcFetchFailed: "⚠️ git fetch 失败（可能离线或远端不存在）。",
+      srcUpdateBtn: "源码树更新（git pull）",
+      srcUpdating: "正在更新源码树…",
+      srcUpdated: "✅ 源码树已更新: {before} → {after}",
+      srcNoUpdate: "源码树已是最新",
+      srcFail: "源码树更新失败: ",
       copiesWarn: "环境中检测到 {n} 个 dsh 副本，仅更新当前运行的这个，其他副本保持不变。",
       npmMismatch: "PATH 上的 npm 与当前运行实例不属于同一 Node 安装，更新将使用当前实例自带的 npm，不会误更新其他副本。",
       localVer: "本地版本",
@@ -109,6 +125,22 @@ window.__ModuleLoader__.load({
       methodNpmOwn: "npm global (running instance's own npm)",
       methodNpmPath: "npm global (PATH npm, verified after run)",
       methodSource: "source tree (update via git pull)",
+      srcBranch: "Branch",
+      srcLocal: "Local commit",
+      srcRemote: "Remote commit",
+      srcBehind: "{n} commits behind",
+      srcAhead: "{n} commits ahead",
+      srcUpdateAvailable: "⚠️ Updates available: {from} → {to} ({behind} commits behind)",
+      srcUpToDate: "✅ Source tree up to date ({commit})",
+      srcDirty: "⚠️ Working tree has uncommitted changes — commit or stash before updating",
+      srcGitMissing: "⚠️ git was not detected (not installed or not on PATH). Install git to use source-tree updates.",
+      srcNotRepo: "⚠️ Not a git repository — cannot run a source-tree update.",
+      srcFetchFailed: "⚠️ git fetch failed (offline or missing remote).",
+      srcUpdateBtn: "Update source tree (git pull)",
+      srcUpdating: "Updating source tree…",
+      srcUpdated: "✅ Source tree updated: {before} → {after}",
+      srcNoUpdate: "Source tree already up to date",
+      srcFail: "Source-tree update failed: ",
       copiesWarn: "Found {n} dsh copies in this environment — only the currently running one is updated; other copies stay untouched.",
       npmMismatch: "The npm on PATH does not belong to the same Node installation as the running instance; updates use the running instance's own npm and never touch other copies.",
       localVer: "Local version",
@@ -312,6 +344,31 @@ window.__ModuleLoader__.load({
           })
         }
 
+        var runSourceUpdate = function () {
+          setUpdate({ phase: "running", result: null })
+          setProg({ type: "source-update", phase: "starting", message: t("srcUpdating"), detail: "", done: 0, total: 0, current: "" })
+          var stopPoll = null
+          if (timer !== undefined) {
+            stopPoll = timer.interval(function () {
+              callProgress().then(function (p) {
+                if (p && p.type === "source-update" && p.phase !== "idle") setProg(p)
+              }).catch(function () { /* 静默 */ })
+            }, 1500)
+          }
+          fetch("/dsh-updater-npm/update-source?uilang=" + uiLang(), { method: "POST", cache: "no-store", signal: AbortSignal.timeout(600000) })
+            .then(function (r) { return r.json() })
+            .then(function (result) {
+              if (stopPoll) stopPoll()
+              setUpdate({ phase: "done", result: result })
+              setProg(null)
+              runCheck()
+            }).catch(function (error) {
+              if (stopPoll) stopPoll()
+              setUpdate({ phase: "done", result: { ok: false, error: String((error && error.message) || error) } })
+              setProg(null)
+            })
+        }
+
         var runNotes = function () {
           var target = RELEASES_URL
           if (typeof window !== "undefined" && window.open) {
@@ -348,7 +405,20 @@ window.__ModuleLoader__.load({
           statusLine = el("div", { style: errStyle }, t("checkFail") + ((state.data && state.data.error) || t("unknownError")))
         } else {
           var d = state.data
-          if (d.remoteError !== null && d.remoteVersion === null) {
+          if (d.mode === "source") {
+            // 源码树模式：git 状态决定提示
+            if (d.gitError === "git-missing") {
+              statusLine = el("div", { style: warnStyle }, t("srcGitMissing"))
+            } else if (d.gitError === "not-repo") {
+              statusLine = el("div", { style: warnStyle }, t("srcNotRepo"))
+            } else if (d.gitError === "git-fetch-failed") {
+              statusLine = el("div", { style: warnStyle }, t("srcFetchFailed"))
+            } else if (d.hasUpdate) {
+              statusLine = el("div", { style: warnStyle }, t("srcUpdateAvailable", { from: d.git && d.git.localHead, to: d.git && d.git.remoteHead, behind: d.git && d.git.behind }))
+            } else {
+              statusLine = el("div", { style: okStyle }, t("srcUpToDate", { commit: d.git && d.git.localHead }))
+            }
+          } else if (d.remoteError !== null && d.remoteVersion === null) {
             statusLine = el("div", { style: warnStyle }, t("remoteError", { err: d.remoteError }))
           } else if (d.hasUpdate) {
             statusLine = el("div", { style: warnStyle }, t("updateAvailable", { from: d.localVersion, to: d.remoteVersion }))
@@ -361,43 +431,68 @@ window.__ModuleLoader__.load({
         if (update !== null) {
           if (update.phase === "running") {
             updateLine = el("div", null,
-              el("div", null, prog && prog.message ? prog.message : t("updating")),
+              el("div", null, prog && prog.message ? prog.message : (update.result && update.result.mode === "source" ? t("srcUpdating") : t("updating"))),
               prog && prog.detail ? el("pre", { style: { margin: "4px 0 0", maxHeight: 90, overflow: "auto", whiteSpace: "pre-wrap", wordBreak: "break-all", fontFamily: "ui-monospace,SFMono-Regular,Menlo,Consolas,monospace", fontSize: 11, opacity: 0.75, background: "rgba(128,128,128,.08)", borderRadius: 6, padding: "6px 8px" } }, prog.detail) : null)
           } else if (update.result && update.result.ok) {
-            updateLine = update.result.updated
-              ? el("div", null,
-                  el("div", { style: okStyle }, t("updated", { from: update.result.beforeVersion, to: update.result.version })),
-                  el("div", { style: Object.assign({ marginTop: 4 }, warnStyle) },
-                    t("restartHint")))
-              : (update.result.warning
-                  ? el("div", { style: warnStyle }, "⚠️ " + update.result.warning)
-                  : el("div", { style: okStyle }, t("noUpdate")))
+            if (update.result.mode === "source") {
+              updateLine = update.result.updated
+                ? el("div", null,
+                    el("div", { style: okStyle }, t("srcUpdated", { before: update.result.before, to: update.result.after })),
+                    el("div", { style: Object.assign({ marginTop: 4 }, warnStyle) }, t("restartHint")))
+                : el("div", { style: okStyle }, update.result.hint || t("srcNoUpdate"))
+            } else if (update.result.updated) {
+              updateLine = el("div", null,
+                el("div", { style: okStyle }, t("updated", { from: update.result.beforeVersion, to: update.result.version })),
+                el("div", { style: Object.assign({ marginTop: 4 }, warnStyle) },
+                  t("restartHint")))
+            } else {
+              updateLine = el("div", { style: warnStyle }, update.result.warning ? "⚠️ " + update.result.warning : t("noUpdate"))
+            }
           } else {
-            updateLine = el("div", { style: errStyle }, t("updateFail") + ((update.result && update.result.error) || t("unknownError")) + ((update.result && update.result.hint) ? t("hintWrap", { hint: update.result.hint }) : ""))
+            var ures = update.result || {}
+            var failMsg = ures.mode === "source" ? t("srcFail") : t("updateFail")
+            updateLine = el("div", { style: errStyle }, failMsg + (ures.error || t("unknownError")))
           }
         }
 
         var data = state.data
         var busy = update !== null && update.phase === "running"
         var sourceMode = !!(data && data.ok && data.mode === "source")
+        var git = data && data.ok ? data.git : null
         return el("div", { style: cardStyle },
           el("div", { style: { fontWeight: 600 } }, t("updTitle")),
           statusLine,
           data && data.ok ? el("div", null,
-            row(t("mode"), data.mode === "source" ? t("modeSource") : t("modeNpm"), true),
+            row(t("mode"), sourceMode ? t("modeSource") : t("modeNpm"), true),
             row(t("updateMethod"), data.updateMethod === "source-git-pull" ? t("methodSource") : data.updateMethod === "npm-global-own" ? t("methodNpmOwn") : t("methodNpmPath"), true),
-            row(t("localVer"), data.localVersion, true),
-            row(t("remoteVer"), data.remoteVersion, true),
+            sourceMode
+              ? (git
+                  ? el("div", null,
+                      row(t("srcBranch"), git.branch, true),
+                      row(t("srcLocal"), git.localHead, true),
+                      row(t("srcRemote"), git.remoteHead || "—", true),
+                      el("div", { style: { marginTop: 2, fontSize: 12, opacity: 0.7 } },
+                        (git.behind > 0 ? t("srcBehind", { n: git.behind }) + (git.ahead > 0 ? " · " : "") : "") + (git.ahead > 0 ? t("srcAhead", { n: git.ahead }) : "")))
+                  : null)
+              : el("div", null,
+                  row(t("localVer"), data.localVersion, true),
+                  row(t("remoteVer"), data.remoteVersion, true)),
             row(t("checkedAt"), data.checkedAt ? new Date(data.checkedAt).toLocaleTimeString() : "—")) : null,
           data && data.ok && data.sourceWarning ? el("div", { style: { marginTop: 4, fontSize: 12, color: "#b26a00" } },
             "⚠️ " + data.sourceWarning) : null,
+          sourceMode && data.gitError === "git-missing" ? el("div", { style: { marginTop: 4, fontSize: 12, color: "#b26a00" } }, t("srcGitMissing")) : null,
+          sourceMode && data.gitError === "not-repo" ? el("div", { style: { marginTop: 4, fontSize: 12, color: "#b26a00" } }, t("srcNotRepo")) : null,
+          sourceMode && data.gitError === "git-fetch-failed" ? el("div", { style: { marginTop: 4, fontSize: 12, color: "#b26a00" } }, t("srcFetchFailed")) : null,
+          sourceMode && git && git.dirty ? el("div", { style: { marginTop: 4, fontSize: 12, color: "#b26a00" } }, t("srcDirty")) : null,
           data && data.ok && data.npmMismatch ? el("div", { style: { marginTop: 4, fontSize: 12, color: "#b26a00" } },
             "⚠️ " + t("npmMismatch")) : null,
           data && data.ok && data.copies && data.copies.length > 0 ? el("div", { style: { marginTop: 4, fontSize: 12, color: "#b26a00" } },
             "⚠️ " + t("copiesWarn", { n: data.copies.length })) : null,
           updateLine,
           el("div", { style: { display: "flex", gap: 8, marginTop: 8, alignItems: "center", flexWrap: "wrap" } },
-            el("button", { style: primaryBtnStyle, onClick: runUpdate, disabled: busy || sourceMode || !(data && data.ok && data.hasUpdate) }, sourceMode ? t("sourceUnavailable") : (busy ? t("updatingShort") : t("updateBtn"))),
+            sourceMode
+              ? el("button", { style: primaryBtnStyle, onClick: runSourceUpdate, disabled: busy || !git || git.dirty || !!data.gitError || !data.hasUpdate }, busy ? t("srcUpdating") : t("srcUpdateBtn"))
+              : el("button", { style: primaryBtnStyle, onClick: runUpdate, disabled: busy || !(data && data.ok && data.hasUpdate) }, busy ? t("updatingShort") : t("updateBtn")),
             el("button", { style: btnStyle, onClick: runNotes }, t("notesBtn")),
             el("button", { style: btnStyle, onClick: runCheck, disabled: state.phase === "running" }, state.phase === "running" ? t("checkingShort") : t("recheck"))),
           el("div", { style: noteStyle }, t("updNote")))
