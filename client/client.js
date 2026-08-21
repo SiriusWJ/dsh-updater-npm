@@ -14,6 +14,15 @@ window.__ModuleLoader__.load({
     Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" })
     var react = require("react")
 
+    // 更新中动效：spinner 帧 + 已运行时间格式化（客户端本地计算，不依赖服务端轮询节奏）
+    var SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+    var fmtElapsed = function (startedAt) {
+      if (!startedAt) return ""
+      var s = Math.max(0, Math.floor((Date.now() - startedAt) / 1000))
+      if (s < 60) return s + "s"
+      return Math.floor(s / 60) + "m " + (s % 60) + "s"
+    }
+
     var name = "dsh-updater-npm"
     var inject = ["slots", "timer", "locale"]
 
@@ -74,6 +83,7 @@ window.__ModuleLoader__.load({
       recheck: "重新检查",
       checkingShort: "检查中…",
       starting: "正在启动更新…",
+      waiting: "正在下载/安装，请稍候…（npm 输出将实时显示在下）",
       updNote: "自动检查每 30 分钟一次（页面每 60 秒刷新缓存结果）；npm 全局模式更新执行 npm install -g @deepseek-ai/dsh@latest，完成后需重启 DSH 生效；源码树模式请用 git pull 更新。「更新说明」在新标签页打开 GitHub Releases。",
       docsTitle: "DSH 文档（官方）",
       docsToggleLabel: "自动同步官方文档",
@@ -165,6 +175,7 @@ window.__ModuleLoader__.load({
       recheck: "Re-check",
       checkingShort: "Checking…",
       starting: "Starting update…",
+      waiting: "Downloading / installing, please wait… (npm output streams below in real time)",
       updNote: "Auto-checks every 30 minutes (page refreshes the cached result every 60s); npm-global mode runs npm install -g @deepseek-ai/dsh@latest, then restart DSH to apply; source-tree mode: use git pull. \"Release notes\" opens GitHub Releases in a new tab.",
       docsTitle: "DSH Docs (official)",
       docsToggleLabel: "Auto-sync official docs",
@@ -289,7 +300,7 @@ window.__ModuleLoader__.load({
           .then(function (r) { return r.json() })
       }
       var callUpdate = function () {
-        return fetch("/dsh-updater-npm/update?uilang=" + uiLang(), { method: "POST", cache: "no-store", signal: AbortSignal.timeout(200000) })
+        return fetch("/dsh-updater-npm/update?uilang=" + uiLang(), { method: "POST", cache: "no-store", signal: AbortSignal.timeout(600000) })
           .then(function (r) { return r.json() })
       }
       var callProgress = function () {
@@ -313,6 +324,16 @@ window.__ModuleLoader__.load({
         var ps0 = react.useState(null)
         var pwshInstall = ps0[0]
         var setPwshInstall = ps0[1]
+        // 动效节拍：更新/安装进行中每秒 +1，驱动 spinner 与进度条流动
+        var tick0 = react.useState(0)
+        var tick = tick0[0]
+        var setTick = tick0[1]
+        var busyNow = update !== null && update.phase === "running"
+        react.useEffect(function () {
+          if (!busyNow || timer === undefined) return
+          var dispose = timer.interval(function () { setTick(function (v) { return v + 1 }) }, 1000)
+          return function () { dispose() }
+        }, [busyNow])
 
         var applyData = function (data) {
           applyHasUpdate(data)
@@ -337,7 +358,7 @@ window.__ModuleLoader__.load({
 
         var runUpdate = function () {
           setUpdate({ phase: "running", result: null })
-          setProg({ type: "update", phase: "starting", message: t("starting"), detail: "", done: 0, total: 0, current: "" })
+          setProg({ type: "update", phase: "starting", message: t("starting"), detail: "", done: 0, total: 0, current: "", startedAt: Date.now() })
           var stopPoll = null
           if (timer !== undefined) {
             stopPoll = timer.interval(function () {
@@ -360,7 +381,7 @@ window.__ModuleLoader__.load({
 
         var runSourceUpdate = function () {
           setUpdate({ phase: "running", result: null })
-          setProg({ type: "source-update", phase: "starting", message: t("srcUpdating"), detail: "", done: 0, total: 0, current: "" })
+          setProg({ type: "source-update", phase: "starting", message: t("srcUpdating"), detail: "", done: 0, total: 0, current: "", startedAt: Date.now() })
           var stopPoll = null
           if (timer !== undefined) {
             stopPoll = timer.interval(function () {
@@ -384,7 +405,7 @@ window.__ModuleLoader__.load({
         }
 
         var runInstallPwsh = function () {
-          setPwshInstall({ phase: "running", result: null, prog: null })
+          setPwshInstall({ phase: "running", result: null, prog: { type: "install-pwsh", phase: "starting", message: t("pwshInstalling"), detail: "", startedAt: Date.now() } })
           var stopPoll = null
           if (timer !== undefined) {
             stopPoll = timer.interval(function () {
@@ -466,9 +487,19 @@ window.__ModuleLoader__.load({
         var updateLine = null
         if (update !== null) {
           if (update.phase === "running") {
+            // 单调递增条：随已运行时间只进不退（封顶 90%），避免"满了又退回去"的误导
+            var uStart = prog && prog.startedAt ? prog.startedAt : Date.now()
+            var uElapsed = Math.max(0, Math.floor((Date.now() - uStart) / 1000))
+            var barW = Math.min(90, 10 + uElapsed * 1.5)
             updateLine = el("div", null,
-              el("div", null, prog && prog.message ? prog.message : (update.result && update.result.mode === "source" ? t("srcUpdating") : t("updating"))),
-              prog && prog.detail ? el("pre", { style: { margin: "4px 0 0", maxHeight: 90, overflow: "auto", whiteSpace: "pre-wrap", wordBreak: "break-all", fontFamily: "ui-monospace,SFMono-Regular,Menlo,Consolas,monospace", fontSize: 11, opacity: 0.75, background: "rgba(128,128,128,.08)", borderRadius: 6, padding: "6px 8px" } }, prog.detail) : null)
+              el("div", { style: { display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" } },
+                el("span", { style: { fontSize: 12 } }, SPINNER[tick % SPINNER.length]),
+                el("span", null, prog && prog.message ? prog.message : (update.result && update.result.mode === "source" ? t("srcUpdating") : t("updating"))),
+                el("span", { style: { opacity: 0.6, fontSize: 11 } }, "⏱ " + fmtElapsed(uStart))),
+              el("div", { style: { marginTop: 6, height: 6, borderRadius: 3, background: "rgba(128,128,128,.2)", overflow: "hidden" } },
+                el("div", { style: { height: "100%", width: barW + "%", background: "#3b82f6", borderRadius: 3, transition: "width .5s linear" } })),
+              el("pre", { style: { margin: "6px 0 0", maxHeight: 150, overflow: "auto", whiteSpace: "pre-wrap", wordBreak: "break-all", fontFamily: "ui-monospace,SFMono-Regular,Menlo,Consolas,monospace", fontSize: 11, opacity: 0.75, background: "rgba(128,128,128,.08)", borderRadius: 6, padding: "6px 8px" } },
+                prog && prog.detail ? prog.detail : t("waiting")))
           } else if (update.result && update.result.ok) {
             if (update.result.mode === "source") {
               updateLine = update.result.updated
@@ -500,8 +531,12 @@ window.__ModuleLoader__.load({
         if (pwshInstall !== null) {
           if (pwshInstall.phase === "running") {
             pwshLine = el("div", null,
-              el("div", null, pwshInstall.prog && pwshInstall.prog.message ? pwshInstall.prog.message : t("pwshInstalling")),
-              pwshInstall.prog && pwshInstall.prog.detail ? el("pre", { style: { margin: "4px 0 0", maxHeight: 90, overflow: "auto", whiteSpace: "pre-wrap", wordBreak: "break-all", fontFamily: "ui-monospace,SFMono-Regular,Menlo,Consolas,monospace", fontSize: 11, opacity: 0.75, background: "rgba(128,128,128,.08)", borderRadius: 6, padding: "6px 8px" } }, pwshInstall.prog.detail) : null)
+              el("div", { style: { display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" } },
+                el("span", { style: { fontSize: 12 } }, SPINNER[tick % SPINNER.length]),
+                el("span", null, pwshInstall.prog && pwshInstall.prog.message ? pwshInstall.prog.message : t("pwshInstalling")),
+                el("span", { style: { opacity: 0.6, fontSize: 11 } }, "⏱ " + fmtElapsed(pwshInstall.prog && pwshInstall.prog.startedAt ? pwshInstall.prog.startedAt : Date.now()))),
+              el("pre", { style: { margin: "6px 0 0", maxHeight: 120, overflow: "auto", whiteSpace: "pre-wrap", wordBreak: "break-all", fontFamily: "ui-monospace,SFMono-Regular,Menlo,Consolas,monospace", fontSize: 11, opacity: 0.75, background: "rgba(128,128,128,.08)", borderRadius: 6, padding: "6px 8px" } },
+                pwshInstall.prog && pwshInstall.prog.detail ? pwshInstall.prog.detail : t("waiting")))
           } else if (pwshInstall.result && pwshInstall.result.ok) {
             pwshLine = el("div", { style: okStyle }, t("pwshInstalled"))
           } else {
@@ -559,7 +594,7 @@ window.__ModuleLoader__.load({
           .then(function (r) { return r.json() })
       }
       var callDocsSync = function () {
-        return fetch("/dsh-updater-npm/docs/sync?uilang=" + uiLang(), { method: "POST", cache: "no-store", signal: AbortSignal.timeout(120000) })
+        return fetch("/dsh-updater-npm/docs/sync?uilang=" + uiLang(), { method: "POST", cache: "no-store", signal: AbortSignal.timeout(600000) })
           .then(function (r) { return r.json() })
       }
       var callDocsSearch = function (q, lang) {
