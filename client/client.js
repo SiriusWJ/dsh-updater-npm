@@ -69,6 +69,11 @@ window.__ModuleLoader__.load({
       pwshInstalling: "正在安装 PowerShell 7…",
       pwshInstalled: "✅ PowerShell 7 已安装，重启 DSH 后生效",
       pwshInstallFail: "PowerShell 7 安装失败: ",
+      deployBrokenWarn: "⚠️ 部署目录不完整（可能是上次更新中断），重启后可能无法启动。建议点击「修复部署」重新安装当前版本。",
+      repairBtn: "修复部署（重装当前版本）",
+      repairRunning: "正在修复部署…（完成后 DSH 自动重启）",
+      repairDone: "✅ 部署已修复，DSH 即将自动重启",
+      repairFail: "部署修复失败: ",
       copiesWarn: "环境中检测到 {n} 个 dsh 副本，仅更新当前运行的这个，其他副本保持不变。",
       npmMismatch: "PATH 上的 npm 与当前运行实例不属于同一 Node 安装，更新将使用当前实例自带的 npm，不会误更新其他副本。",
       localVer: "本地版本",
@@ -161,6 +166,11 @@ window.__ModuleLoader__.load({
       pwshInstalling: "Installing PowerShell 7…",
       pwshInstalled: "✅ PowerShell 7 installed — restart DSH to apply",
       pwshInstallFail: "PowerShell 7 install failed: ",
+      deployBrokenWarn: "⚠️ The deployment directory is incomplete (possibly an interrupted update) — DSH may fail to start after a restart. Click \"Repair deployment\" to reinstall the current version.",
+      repairBtn: "Repair deployment (reinstall current version)",
+      repairRunning: "Repairing the deployment… (DSH restarts automatically when done)",
+      repairDone: "✅ Deployment repaired — DSH is about to restart",
+      repairFail: "Deployment repair failed: ",
       copiesWarn: "Found {n} dsh copies in this environment — only the currently running one is updated; other copies stay untouched.",
       npmMismatch: "The npm on PATH does not belong to the same Node installation as the running instance; updates use the running instance's own npm and never touch other copies.",
       localVer: "Local version",
@@ -334,6 +344,10 @@ window.__ModuleLoader__.load({
           var dispose = timer.interval(function () { setTick(function (v) { return v + 1 }) }, 1000)
           return function () { dispose() }
         }, [busyNow])
+        // 部署修复状态
+        var rp0 = react.useState(null)
+        var repair = rp0[0]
+        var setRepair = rp0[1]
 
         var applyData = function (data) {
           applyHasUpdate(data)
@@ -424,6 +438,14 @@ window.__ModuleLoader__.load({
               if (stopPoll) stopPoll()
               setPwshInstall({ phase: "done", result: { ok: false, error: String((error && error.message) || error) }, prog: null })
             })
+        }
+
+        var runRepair = function () {
+          setRepair({ phase: "running", result: null })
+          fetch("/dsh-updater-npm/repair?uilang=" + uiLang(), { method: "POST", cache: "no-store", signal: AbortSignal.timeout(600000) })
+            .then(function (r) { return r.json() })
+            .then(function (result) { setRepair({ phase: "done", result: result }) })
+            .catch(function (error) { setRepair({ phase: "done", result: { ok: false, error: String((error && error.message) || error) } }) })
         }
 
         var runNotes = function () {
@@ -575,6 +597,8 @@ window.__ModuleLoader__.load({
             "⚠️ " + t("copiesWarn", { n: data.copies.length })) : null,
           data && data.ok && data.pwshInstalled === false ? el("div", { style: { marginTop: 4, fontSize: 12, color: "#b26a00" } },
             t("pwshMissingHint")) : null,
+          data && data.ok && data.deployBroken ? el("div", { style: { marginTop: 4, fontSize: 12, color: "#c62828" } },
+            t("deployBrokenWarn")) : null,
           updateLine,
           el("div", { style: { display: "flex", gap: 8, marginTop: 8, alignItems: "center", flexWrap: "wrap" } },
             sourceMode
@@ -585,6 +609,12 @@ window.__ModuleLoader__.load({
           data && data.ok && data.pwshInstalled === false ? el("div", { style: { display: "flex", gap: 8, marginTop: 8, alignItems: "center", flexWrap: "wrap" } },
             el("button", { style: primaryBtnStyle, onClick: runInstallPwsh, disabled: pwshInstall !== null && pwshInstall.phase === "running" }, pwshInstall !== null && pwshInstall.phase === "running" ? t("pwshInstalling") : t("pwshInstallBtn")),
             pwshLine) : null,
+          data && data.ok && data.deployBroken ? el("div", { style: { display: "flex", gap: 8, marginTop: 8, alignItems: "center", flexWrap: "wrap" } },
+            el("button", { style: primaryBtnStyle, onClick: runRepair, disabled: repair !== null && repair.phase === "running" }, repair !== null && repair.phase === "running" ? t("repairRunning") : t("repairBtn")),
+            repair !== null && repair.phase === "done"
+              ? el("div", { style: repair.result && repair.result.ok ? okStyle : errStyle },
+                  repair.result && repair.result.ok ? t("repairDone") : t("repairFail") + ((repair.result && repair.result.error) || t("unknownError")))
+              : null) : null,
           el("div", { style: noteStyle }, t("updNote")))
       }
 
