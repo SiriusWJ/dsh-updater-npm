@@ -60,7 +60,7 @@ dsh plugin --profile web add github:SiriusWJ/dsh-updater-npm
 
 | 模式 | 识别依据 | 更新方式 | 说明 |
 | --- | --- | --- | --- |
-| npm-global | `argv[1]` 为 `<install>/lib/bin.js` | 用**当前运行实例自带 npm**（`<root>/node_modules/npm/bin/npm-cli.js`）执行 `npm install -g @deepseek-ai/dsh@latest` | 正常部署场景；更新只落在当前运行副本，完成后回读版本校验是否真的生效 |
+| npm-global | `argv[1]` 为 `<install>/lib/bin.js` | **Windows：staged 更新**（新版本装入独立暂存目录 → 完成器等 DSH 退出后无锁替换并重启，失败自动回滚旧版）；非 Windows：原地 `npm install -g` | 正常部署场景；**Windows 上更新目标即运行实例自身（含 native 依赖），原地 npm install 会撞 EBUSY 导致半拆半装**——staged 流程全程不触碰运行中的部署目录，替换时旧目录先改名备份（`.old-*`），新包校验失败自动恢复当前版本并重启；每次启动检测部署目录完整性，损坏时提示「修复部署」一键重装当前版本 |
 | source（源码树） | `argv[1]` 含 `bin.ts` / `tsx` / `apps/` | **源码树更新**：`git fetch` → `git pull --ff-only` → 安装依赖（pnpm/npm） | 源码树运行（如 `pnpm dsh web`）时 npm -g 不影响运行实例；设置页显示分支/本地与远端提交/落后数，一键更新；工作区有未提交修改或未安装 git 时会明确提示并禁用按钮 |
 
 > **多副本保护**：环境里可能有多个 dsh 副本（多个 Node 安装的全局目录、DSH profiles 等）。
