@@ -33,7 +33,7 @@ dsh plugin --profile web add github:SiriusWJ/dsh-updater-npm
 
 - 自动检查每 30 分钟一次（页面每 60 秒刷新缓存结果）。
 - 检测到新版本时，设置页左侧导航「DSH 更新」旁会显示一个**红色小圆点**（🔴）。
-- 点击「通过 npm 更新」执行 `npm install -g @deepseek-ai/dsh@latest`，期间显示**实时进度**（npm 输出尾部），完成后提示重启 DSH 生效。
+- 点击「通过 npm 更新」执行 `npm install -g @deepseek-ai/dsh@latest`，期间显示**实时进度**（npm 输出尾部），完成后出现**「重启 DSH」按钮**——点击后按原启动命令自动退出并重新拉起（**跨平台**：Windows 用 PowerShell，macOS/Linux 用 `/bin/sh`；源码树更新与部署修复完成后同样提供该按钮）。
 - 版本比较为 semver 风格：本地比远端新（如 rc.7 vs rc.6）时不会误报更新。
 
 ### DSH 文档
@@ -60,7 +60,7 @@ dsh plugin --profile web add github:SiriusWJ/dsh-updater-npm
 
 | 模式 | 识别依据 | 更新方式 | 说明 |
 | --- | --- | --- | --- |
-| npm-global | `argv[1]` 为 `<install>/lib/bin.js` | **Windows：staged 更新**（新版本装入独立暂存目录 → 完成器等 DSH 退出后无锁替换并重启，失败自动回滚旧版）；非 Windows：原地 `npm install -g` | 正常部署场景；**Windows 上更新目标即运行实例自身（含 native 依赖），原地 npm install 会撞 EBUSY 导致半拆半装**——staged 流程全程不触碰运行中的部署目录，替换时旧目录先改名备份（`.old-*`），新包校验失败自动恢复当前版本并重启；每次启动检测部署目录完整性，损坏时提示「修复部署」一键重装当前版本 |
+| npm-global | `argv[1]` 为 `<install>/lib/bin.js` | **Windows：staged 更新**（新版本装入独立暂存目录 → 点击「重启 DSH」时无锁原子替换并重启，失败自动回滚旧版）；非 Windows：原地 `npm install -g`，完成后点「重启 DSH」 | 正常部署场景；**Windows 上更新目标即运行实例自身（含 native 依赖），原地 npm install 会撞 EBUSY 导致半拆半装**——staged 流程全程不触碰运行中的部署目录，替换时旧目录先改名备份（`.old-*`），新包校验失败自动恢复当前版本；重启脚本会先校验暂存新包（不通过则放弃整个操作、进程不退出）；每次启动检测部署目录完整性，损坏时提示「修复部署」一键重装当前版本（同样手动重启） |
 | source（源码树） | `argv[1]` 含 `bin.ts` / `tsx` / `apps/` | **源码树更新**：`git fetch` → `git pull --ff-only` → 安装依赖（pnpm/npm） | 源码树运行（如 `pnpm dsh web`）时 npm -g 不影响运行实例；设置页显示分支/本地与远端提交/落后数，一键更新；工作区有未提交修改或未安装 git 时会明确提示并禁用按钮 |
 
 > **多副本保护**：环境里可能有多个 dsh 副本（多个 Node 安装的全局目录、DSH profiles 等）。
@@ -76,6 +76,7 @@ dsh plugin --profile web add github:SiriusWJ/dsh-updater-npm
 
 - `GET  /dsh-updater-npm/check` —— 更新检查（10 分钟缓存）
 - `POST /dsh-updater-npm/update` —— 执行 npm 更新（同源保护）
+- `POST /dsh-updater-npm/restart` —— 重启当前 DSH 实例（同源保护；若有待交换暂存包则先原子替换部署再重启，支持 Windows/macOS/Linux）
 - `GET  /dsh-updater-npm/progress` —— 更新/同步实时进度（轮询）
 - `GET  /dsh-updater-npm/docs/status` —— 文档同步状态
 - `POST /dsh-updater-npm/docs/sync` —— 触发文档同步（同源保护）
@@ -94,7 +95,10 @@ dsh plugin --profile web add github:SiriusWJ/dsh-updater-npm
 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness):
 
 - **DSH Update (npm)**: check the latest `@deepseek-ai/dsh` on npm, one-click
-  `npm install -g @deepseek-ai/dsh@latest`, with **live progress** (npm output stream).
+  `npm install -g @deepseek-ai/dsh@latest`, with **live progress** (npm output stream);
+  after the update a **"Restart DSH"** button appears — it exits the current process
+  and relaunches with the original command line (PowerShell on Windows, `/bin/sh` on
+  macOS/Linux; also shown after source-tree updates and deployment repair).
 - **DSH Docs (official)**: incrementally sync `deepseek-ai/deepseek-harness` `docs/`
   to `$DSH_HOME/docs-sync/` (skips unchanged files by GitHub blob sha) with a **progress bar**,
   plus `dsh_docs_search` / `dsh_docs_read` model tools for in-conversation doc lookup.

@@ -39,6 +39,7 @@ window.__ModuleLoader__.load({
       upToDate: "✅ 已是最新版本（v{v}）",
       updating: "正在通过 npm 更新…（可能需要 1-3 分钟）",
       updated: "✅ 已更新: v{from} → v{to}",
+      stagedReady: "✅ 新版 v{version} 已就绪（暂存完成，尚未生效）——点击下方「重启 DSH」完成更新",
       restartHint: "⚠️ 新版本已安装，重启 DSH 后生效",
       noUpdate: "已是最新，无需更新",
       updateFail: "更新失败: ",
@@ -69,10 +70,14 @@ window.__ModuleLoader__.load({
       pwshInstalling: "正在安装 PowerShell 7…",
       pwshInstalled: "✅ PowerShell 7 已安装，重启 DSH 后生效",
       pwshInstallFail: "PowerShell 7 安装失败: ",
+      restartBtn: "重启 DSH",
+      restarting: "正在重启 DSH…",
+      restartLaunched: "✅ 已触发重启：DSH 即将退出并自动重新启动…",
+      restartFail: "重启失败: ",
       deployBrokenWarn: "⚠️ 部署目录不完整（可能是上次更新中断），重启后可能无法启动。建议点击「修复部署」重新安装当前版本。",
       repairBtn: "修复部署（重装当前版本）",
-      repairRunning: "正在修复部署…（完成后 DSH 自动重启）",
-      repairDone: "✅ 部署已修复，DSH 即将自动重启",
+      repairRunning: "正在修复部署…（重装当前版本，完成后点击「重启 DSH」生效）",
+      repairDone: "✅ 部署已修复——点击「重启 DSH」使其生效",
       repairFail: "部署修复失败: ",
       copiesWarn: "环境中检测到 {n} 个 dsh 副本，仅更新当前运行的这个，其他副本保持不变。",
       npmMismatch: "PATH 上的 npm 与当前运行实例不属于同一 Node 安装，更新将使用当前实例自带的 npm，不会误更新其他副本。",
@@ -136,6 +141,7 @@ window.__ModuleLoader__.load({
       upToDate: "✅ Already up to date (v{v})",
       updating: "Updating via npm… (may take 1-3 minutes)",
       updated: "✅ Updated: v{from} → v{to}",
+      stagedReady: "✅ v{version} staged and ready (not live yet) — click \"Restart DSH\" below to finish",
       restartHint: "⚠️ New version installed — restart DSH to apply",
       noUpdate: "Already up to date, nothing to update",
       updateFail: "Update failed: ",
@@ -166,10 +172,14 @@ window.__ModuleLoader__.load({
       pwshInstalling: "Installing PowerShell 7…",
       pwshInstalled: "✅ PowerShell 7 installed — restart DSH to apply",
       pwshInstallFail: "PowerShell 7 install failed: ",
+      restartBtn: "Restart DSH",
+      restarting: "Restarting DSH…",
+      restartLaunched: "✅ Restart triggered — DSH will exit and relaunch itself…",
+      restartFail: "Restart failed: ",
       deployBrokenWarn: "⚠️ The deployment directory is incomplete (possibly an interrupted update) — DSH may fail to start after a restart. Click \"Repair deployment\" to reinstall the current version.",
       repairBtn: "Repair deployment (reinstall current version)",
-      repairRunning: "Repairing the deployment… (DSH restarts automatically when done)",
-      repairDone: "✅ Deployment repaired — DSH is about to restart",
+      repairRunning: "Repairing the deployment… (reinstalls the current version; click \"Restart DSH\" when done)",
+      repairDone: "✅ Deployment repaired — click \"Restart DSH\" to apply",
       repairFail: "Deployment repair failed: ",
       copiesWarn: "Found {n} dsh copies in this environment — only the currently running one is updated; other copies stay untouched.",
       npmMismatch: "The npm on PATH does not belong to the same Node installation as the running instance; updates use the running instance's own npm and never touch other copies.",
@@ -348,6 +358,10 @@ window.__ModuleLoader__.load({
         var rp0 = react.useState(null)
         var repair = rp0[0]
         var setRepair = rp0[1]
+        // 重启 DSH 状态
+        var rr0 = react.useState(null)
+        var restart = rr0[0]
+        var setRestart = rr0[1]
 
         var applyData = function (data) {
           applyHasUpdate(data)
@@ -448,6 +462,14 @@ window.__ModuleLoader__.load({
             .catch(function (error) { setRepair({ phase: "done", result: { ok: false, error: String((error && error.message) || error) } }) })
         }
 
+        var runRestart = function () {
+          setRestart({ phase: "running", result: null })
+          fetch("/dsh-updater-npm/restart?uilang=" + uiLang(), { method: "POST", cache: "no-store", signal: AbortSignal.timeout(30000) })
+            .then(function (r) { return r.json() })
+            .then(function (result) { setRestart({ phase: "done", result: result }) })
+            .catch(function (error) { setRestart({ phase: "done", result: { ok: false, error: String((error && error.message) || error) } }) })
+        }
+
         var runNotes = function () {
           var target = RELEASES_URL
           if (typeof window !== "undefined" && window.open) {
@@ -529,6 +551,10 @@ window.__ModuleLoader__.load({
                     el("div", { style: okStyle }, t("srcUpdated", { before: update.result.before, to: update.result.after })),
                     el("div", { style: Object.assign({ marginTop: 4 }, warnStyle) }, t("restartHint")))
                 : el("div", { style: okStyle }, update.result.hint || t("srcNoUpdate"))
+            } else if (update.result.staged) {
+              updateLine = el("div", null,
+                el("div", { style: okStyle }, t("stagedReady", { version: update.result.version })),
+                el("div", { style: Object.assign({ marginTop: 4 }, warnStyle) }, t("restartHint")))
             } else if (update.result.updated) {
               updateLine = el("div", null,
                 el("div", { style: okStyle }, t("updated", { from: update.result.beforeVersion, to: update.result.version })),
@@ -548,6 +574,9 @@ window.__ModuleLoader__.load({
         var busy = update !== null && update.phase === "running"
         var sourceMode = !!(data && data.ok && data.mode === "source")
         var git = data && data.ok ? data.git : null
+        // 需要重启的时机：更新完成（含 Windows staged / 源码树 / 非 Windows npm）或部署修复完成
+        var restartReady = (update !== null && update.phase === "done" && update.result && update.result.ok && update.result.needsRestart === true)
+          || (repair !== null && repair.phase === "done" && repair.result && repair.result.ok && repair.result.needsRestart === true)
 
         var pwshLine = null
         if (pwshInstall !== null) {
@@ -600,6 +629,14 @@ window.__ModuleLoader__.load({
           data && data.ok && data.deployBroken ? el("div", { style: { marginTop: 4, fontSize: 12, color: "#c62828" } },
             t("deployBrokenWarn")) : null,
           updateLine,
+          restartReady ? el("div", { style: { display: "flex", gap: 8, marginTop: 8, alignItems: "center", flexWrap: "wrap" } },
+            el("button", { style: primaryBtnStyle, onClick: runRestart, disabled: restart !== null && restart.phase === "running" },
+              restart !== null && restart.phase === "running" ? t("restarting") : t("restartBtn")),
+            restart !== null && restart.phase === "done"
+              ? el("div", { style: restart.result && restart.result.ok ? okStyle : errStyle },
+                  restart.result && restart.result.ok ? t("restartLaunched") : t("restartFail") + ((restart.result && restart.result.error) || t("unknownError")))
+              : null)
+            : null,
           el("div", { style: { display: "flex", gap: 8, marginTop: 8, alignItems: "center", flexWrap: "wrap" } },
             sourceMode
               ? el("button", { style: primaryBtnStyle, onClick: runSourceUpdate, disabled: busy || !git || git.dirty || !!data.gitError || !data.hasUpdate }, busy ? t("srcUpdating") : t("srcUpdateBtn"))
