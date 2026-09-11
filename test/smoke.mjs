@@ -13,7 +13,7 @@
 import { strict as assert } from 'node:assert'
 import { spawnSync } from 'node:child_process'
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, rmSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, dirname } from 'node:path'
 import { tmpdir } from 'node:os'
 
 // 隔离 DSH_HOME：apply() 会读写 $DSH_HOME/plugin-data，绝不能碰用户真实的家目录
@@ -25,15 +25,20 @@ const t = mod.__test
 
 let pass = 0
 let fail = 0
+// 顺序化执行：check 可以传 async 函数，断言真正跑完才计数（否则 async 断言会被漏掉）
+let chain = Promise.resolve()
 const check = (name, fn) => {
-  try {
-    fn()
-    pass += 1
-    console.log('  ok   ' + name)
-  } catch (error) {
-    fail += 1
-    console.log('  FAIL ' + name + '\n       ' + String((error && error.message) || error).split('\n')[0])
-  }
+  chain = chain.then(async () => {
+    try {
+      await fn()
+      pass += 1
+      console.log('  ok   ' + name)
+    } catch (error) {
+      fail += 1
+      console.log('  FAIL ' + name + '\n       ' + String((error && error.message) || error).split('\n')[0])
+    }
+  })
+  return chain
 }
 const section = (title) => console.log('\n' + title)
 
@@ -229,10 +234,7 @@ check('POSIX 分支保留回滚点（不 rm -rf "$OLD"）', () => {
   assert.ok(!/rm -rf "\$OLD"/.test(shScript), 'must not delete the rollback point')
 })
 
-rmSync(root, { recursive: true, force: true })
-
-// ── 7. apply() 冒烟：mock ctx 下不抛异常并注册全部路由 ───────────────────────
-section('7) apply() —— mock ctx 挂载')
+// ── 7. apply() 冒烟：mock ctx 下不抛异常并注册全部路由 ───────────────────────section('7) apply() —— mock ctx 挂载')
 try {
   const routes = []
   const disposers = []
@@ -279,6 +281,75 @@ try {
   check('apply() mock 挂载（未抛异常）', () => { throw error })
 }
 
+// ── 8. 插件自身版本 / 自更新闸门 ────────────────────────────────────────────
+section('8) 插件自身版本 / 自更新闸门')
+check('selfVersion() 与本插件 package.json 一致', () => {
+  const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
+  assert.equal(t.selfVersion(), pkg.version)
+})
+check('自更新命令形状正确', () => {
+  assert.match(t.selfUpdateCommand('9.9.9'), /^dsh plugin --profile \S+ add dsh-updater-npm@9\.9\.9$/)
+})
+check('resolveProfileName() 返回非空 profile 名', () => {
+  const profile = t.resolveProfileName()
+  assert.ok(typeof profile === 'string' && profile.length > 0, 'got ' + String(profile))
+})
+check('闸门只在「确定有新版插件」时拦截（离线性放行）', () => {
+  assert.equal(t.updateBlockedBySelf({ hasUpdate: true }), true)
+  assert.equal(t.updateBlockedBySelf({ hasUpdate: false }), false)
+  assert.equal(t.updateBlockedBySelf(null), false)
+  assert.equal(t.updateBlockedBySelf({}), false)
+})
+check('selfUpdateStatus() 结构正确（registry 不可达时 latest=null）', async () => {
+  const st = await t.selfUpdateStatus()
+  assert.ok(st.latest === null || typeof st.latest === 'string', 'bad latest')
+  if (st.latest === null) assert.ok(typeof st.error === 'string' && st.error.length > 0, 'missing error')
+  else assert.equal(typeof st.version, 'string')
+})
+check('/check 载荷包含插件版本与全部安全网字段', async () => {
+  const work = mkdtempSync(join(tmpdir(), 'dsh-updater-check-'))
+  mkdirSync(join(work, 'lib'), { recursive: true })
+  writeFileSync(join(work, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh', version: '0.1.2-rc.1' }))
+  writeFileSync(join(work, 'lib', 'bin.js'), '// stub')
+  // 真实约定：随部署自带的 preset 位于 <安装目录>/agent-presets/<id>/agent.cordis.yml
+  const presetPath = join(work, 'agent-presets', 'cordis', 'agent.cordis.yml')
+  mkdirSync(dirname(presetPath), { recursive: true })
+  writeFileSync(presetPath, '')
+  const routes = []
+  const ctx = {
+    get: () => undefined,
+    on: () => {},
+    effect: (fn) => { fn(); return () => {} },
+    inject: (deps, fn) => { fn(ctx) },
+    timer: { interval: () => () => {}, timeout: async () => {} },
+    webServer: { register: (r) => { routes.push(r); return () => {} } },
+    agentPresets: { list: async () => [{ id: 'cordis', path: presetPath }] },
+  }
+  mod.apply(ctx)
+  const route = routes.find((r) => r.path === '/dsh-updater-npm/check')
+  assert.ok(route !== undefined, 'check route missing')
+  const rec = {}
+  const res = { writeHead: (code) => { rec.code = code }, end: (body) => { rec.body = body } }
+  route.handler({ method: 'GET', headers: { origin: 'http://127.0.0.1:3080', host: '127.0.0.1:3080' } }, res)
+  for (let i = 0; i < 80 && rec.body === undefined; i += 1) await new Promise((r) => setTimeout(r, 250))
+  assert.ok(rec.body !== undefined, 'check handler did not respond in time')
+  const body = JSON.parse(rec.body)
+  rmSync(work, { recursive: true, force: true })
+  assert.equal(body.ok, true, 'check payload not ok: ' + String(body.error || ''))
+  assert.ok(body.plugin !== undefined && typeof body.plugin.version === 'string', 'plugin.version missing')
+  assert.equal(typeof body.plugin.hasUpdate, 'boolean', 'plugin.hasUpdate missing')
+  assert.match(String(body.plugin.updateCommand), /dsh plugin --profile /)
+  assert.ok('releaseUrl' in body, 'releaseUrl missing')
+  // breaking 是给前端本地化前的中间态（JSON 里被丢掉），最终暴露的是 breakingText
+  if (body.hasUpdate) {
+    assert.ok(typeof body.breakingText === 'string' && body.breakingText.length > 0, 'breakingText missing while hasUpdate')
+    assert.ok(typeof body.releaseUrl === 'string' && body.releaseUrl.includes('releases/tag/dsh-v'), 'releaseUrl malformed')
+  }
+  assert.ok('lastRestart' in body && 'stagingWaste' in body && 'npmResiduals' in body, 'safety fields missing')
+})
+
+await chain
+rmSync(root, { recursive: true, force: true })
 rmSync(sandboxHome, { recursive: true, force: true })
 console.log('\n' + (fail === 0 ? 'PASS' : 'FAIL') + ': ' + pass + ' passed, ' + fail + ' failed')
 process.exit(fail === 0 ? 0 : 1)

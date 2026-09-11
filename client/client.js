@@ -91,6 +91,14 @@ window.__ModuleLoader__.load({
     cleanupRunning: "正在清理…",
     cleanupDone: "✅ 已清理 {n} 项，释放 {mb} MB",
     cleanupFail: "清理失败: ",
+    pluginVer: "插件版本",
+    pluginOutdatedTitle: "插件自身需要先更新",
+    pluginOutdatedBody: "升级 DSH 的动作由插件代码执行；旧版插件的升级流程本身有风险（例如 1.9.0 在 Windows 上会丢掉新版本的依赖）。请先执行下面这条命令更新插件，重启 DSH 后再升级：",
+    pluginBlocked: "已禁用「通过 npm 更新」：请先更新插件",
+    pluginCheckFail: "插件版本检查失败",
+    copyBtn: "复制命令",
+    copied: "已复制",
+    pluginUpToDate: "插件已是最新",
       repairBtn: "修复部署（重装当前版本）",
       repairRunning: "正在修复部署…（重装当前版本，完成后点击「重启 DSH」生效）",
       repairDone: "✅ 部署已修复——点击「重启 DSH」使其生效",
@@ -209,6 +217,14 @@ window.__ModuleLoader__.load({
     cleanupRunning: "Cleaning…",
     cleanupDone: "✅ Cleaned {n} item(s), freed {mb} MB",
     cleanupFail: "Cleanup failed: ",
+    pluginVer: "Plugin version",
+    pluginOutdatedTitle: "The plugin itself must be updated first",
+    pluginOutdatedBody: "Updating DSH is performed by the plugin code; an outdated plugin makes that upgrade unsafe (1.9.0, for example, loses the new version's dependencies on Windows). Run the command below to update the plugin, restart DSH, then upgrade:",
+    pluginBlocked: "\"Update via npm\" is disabled: update the plugin first",
+    pluginCheckFail: "Plugin version check failed",
+    copyBtn: "Copy command",
+    copied: "Copied",
+    pluginUpToDate: "Plugin is up to date",
       repairBtn: "Repair deployment (reinstall current version)",
       repairRunning: "Repairing the deployment… (reinstalls the current version; click \"Restart DSH\" when done)",
       repairDone: "✅ Deployment repaired — click \"Restart DSH\" to apply",
@@ -290,6 +306,12 @@ window.__ModuleLoader__.load({
     var okStyle = { color: "#2e7d32", fontWeight: 600 }
     var warnStyle = { color: "#b26a00", fontWeight: 600 }
     var errStyle = { color: "#c62828" }
+    var cmdStyle = {
+      display: "inline-block", padding: "3px 8px", borderRadius: 6,
+      background: "rgba(128,128,128,.12)",
+      fontFamily: "ui-monospace,SFMono-Regular,Menlo,Consolas,monospace",
+      fontSize: 12, wordBreak: "break-all", userSelect: "all",
+    }
     var btnStyle = {
       padding: "4px 14px", borderRadius: 6, border: "1px solid rgba(128,128,128,.5)",
       background: "transparent", cursor: "pointer", fontSize: 12,
@@ -398,6 +420,10 @@ window.__ModuleLoader__.load({
         var cl0 = react.useState(null)
         var cleanup = cl0[0]
         var setCleanup = cl0[1]
+        // 「复制命令」反馈
+        var cp0 = react.useState(null)
+        var copied = cp0[0]
+        var setCopied = cp0[1]
 
         var applyData = function (data) {
           applyHasUpdate(data)
@@ -505,6 +531,20 @@ window.__ModuleLoader__.load({
             .then(function (result) { setRestart({ phase: "done", result: result }) })
             .catch(function (error) { setRestart({ phase: "done", result: { ok: false, error: String((error && error.message) || error) } }) })
         }
+
+        var copyCmd = function (text) {
+          var mark = function () {
+            setCopied(text)
+            if (typeof window !== "undefined") window.setTimeout(function () { setCopied(null) }, 1500)
+          }
+          try {
+            if (typeof navigator !== "undefined" && navigator.clipboard && navigator.clipboard.writeText) {
+              navigator.clipboard.writeText(text).then(mark, function () { /* 剪贴板被拒：不谎报成功 */ })
+            }
+          } catch (e) { /* 忽略 */ }
+        }
+
+        var canCopy = typeof navigator !== "undefined" && !!navigator.clipboard && !!navigator.clipboard.writeText
 
         var runCleanup = function () {
           setCleanup({ phase: "running", result: null })
@@ -626,12 +666,21 @@ window.__ModuleLoader__.load({
           } else {
             var ures = update.result || {}
             var failMsg = ures.mode === "source" ? t("srcFail") : t("updateFail")
-            updateLine = el("div", { style: errStyle }, failMsg + (ures.error || t("unknownError")))
+            updateLine = ures.pluginOutdated
+              ? el("div", null,
+                  el("div", { style: errStyle }, "⚠️ " + failMsg + (ures.error || t("unknownError"))),
+                  ures.updateCommand ? el("div", { style: { marginTop: 6 } },
+                    el("code", { style: cmdStyle }, ures.updateCommand),
+                    canCopy ? el("button", { style: Object.assign({ marginLeft: 8 }, btnStyle), onClick: function () { copyCmd(ures.updateCommand) } },
+                      copied === ures.updateCommand ? t("copied") : t("copyBtn")) : null) : null)
+              : el("div", { style: errStyle }, failMsg + (ures.error || t("unknownError")))
           }
         }
 
         var data = state.data
         var busy = update !== null && update.phase === "running"
+        // 插件自身过旧时禁止「通过 npm 更新」：这一步由旧插件代码执行，有风险
+        var pluginOutdated = !!(data && data.ok && data.plugin && data.plugin.hasUpdate)
         var sourceMode = !!(data && data.ok && data.mode === "source")
         var git = data && data.ok ? data.git : null
         // 需要重启的时机：更新完成（含 Windows staged / 源码树 / 非 Windows npm）或部署修复完成
@@ -673,7 +722,12 @@ window.__ModuleLoader__.load({
               : el("div", null,
                   row(t("localVer"), data.localVersion, true),
                   row(t("remoteVer"), data.remoteVersion, true)),
-            row(t("checkedAt"), data.checkedAt ? new Date(data.checkedAt).toLocaleTimeString() : "—")) : null,
+            row(t("checkedAt"), data.checkedAt ? new Date(data.checkedAt).toLocaleTimeString() : "—"),
+            row(t("pluginVer"),
+              data.plugin
+                ? (data.plugin.version || "—") + (data.plugin.hasUpdate ? "  →  " + data.plugin.latest : "") + (data.plugin.latest === null ? "  (" + t("pluginCheckFail") + ")" : "")
+                : "—",
+              true)) : null,
           data && data.ok && data.sourceWarning ? el("div", { style: { marginTop: 4, fontSize: 12, color: "#b26a00" } },
             "⚠️ " + data.sourceWarning) : null,
           sourceMode && data.gitError === "git-missing" ? el("div", { style: { marginTop: 4, fontSize: 12, color: "#b26a00" } }, t("srcGitMissing")) : null,
@@ -713,6 +767,14 @@ window.__ModuleLoader__.load({
                     ? t("cleanupDone", { n: cleanup.result.files, mb: fmtMb(cleanup.result.bytes) })
                     : t("cleanupFail") + ((cleanup.result && cleanup.result.error) || t("unknownError")))
               : null) : null,
+          data && data.ok && data.plugin && data.plugin.hasUpdate ? el("div", { style: { marginTop: 6, padding: "8px 10px", borderRadius: 8, background: "rgba(198,40,40,.10)", fontSize: 12, color: "#c62828" } },
+            el("div", { style: { fontWeight: 600 } }, "⚠️ " + t("pluginOutdatedTitle") + "：v" + (data.plugin.version || "?") + " → v" + data.plugin.latest),
+            el("div", { style: { marginTop: 3, lineHeight: 1.5 } }, t("pluginOutdatedBody")),
+            el("div", { style: { marginTop: 6, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" } },
+              el("code", { style: cmdStyle }, data.plugin.updateCommand),
+              canCopy ? el("button", { style: btnStyle, onClick: function () { copyCmd(data.plugin.updateCommand) } },
+                copied === data.plugin.updateCommand ? t("copied") : t("copyBtn")) : null),
+            el("div", { style: { marginTop: 4, opacity: 0.85 } }, t("pluginBlocked"))) : null,
           updateLine,
           restartReady ? el("div", { style: { display: "flex", gap: 8, marginTop: 8, alignItems: "center", flexWrap: "wrap" } },
             el("button", { style: primaryBtnStyle, onClick: runRestart, disabled: restart !== null && restart.phase === "running" },
@@ -725,7 +787,7 @@ window.__ModuleLoader__.load({
           el("div", { style: { display: "flex", gap: 8, marginTop: 8, alignItems: "center", flexWrap: "wrap" } },
             sourceMode
               ? el("button", { style: primaryBtnStyle, onClick: runSourceUpdate, disabled: busy || !git || git.dirty || !!data.gitError || !data.hasUpdate }, busy ? t("srcUpdating") : t("srcUpdateBtn"))
-              : el("button", { style: primaryBtnStyle, onClick: runUpdate, disabled: busy || !(data && data.ok && data.hasUpdate) }, busy ? t("updatingShort") : t("updateBtn")),
+              : el("button", { style: primaryBtnStyle, onClick: runUpdate, disabled: busy || pluginOutdated || !(data && data.ok && data.hasUpdate), title: pluginOutdated ? t("pluginBlocked") : undefined }, busy ? t("updatingShort") : (pluginOutdated ? t("pluginBlocked") : t("updateBtn"))),
             el("button", { style: btnStyle, onClick: runNotes }, t("notesBtn")),
             el("button", { style: btnStyle, onClick: runCheck, disabled: state.phase === "running" }, state.phase === "running" ? t("checkingShort") : t("recheck"))),
           data && data.ok && data.pwshInstalled === false ? el("div", { style: { display: "flex", gap: 8, marginTop: 8, alignItems: "center", flexWrap: "wrap" } },

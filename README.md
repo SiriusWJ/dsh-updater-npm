@@ -36,6 +36,20 @@ dsh plugin --profile web add github:SiriusWJ/dsh-updater-npm
 - 点击「通过 npm 更新」执行 `npm install -g @deepseek-ai/dsh@latest`，期间显示**实时进度**（npm 输出尾部），完成后出现**「重启 DSH」按钮**——点击后按原启动命令自动退出并重新拉起（**跨平台**：Windows 用 PowerShell，macOS/Linux 用 `/bin/sh`；源码树更新与部署修复完成后同样提供该按钮）。
 - 版本比较为 semver 风格：本地比远端新（如 rc.7 vs rc.6）时不会误报更新。
 
+### 插件自身版本与自更新闸门
+
+- 「DSH 更新」卡片会显示**本插件自己的版本号**，并对照 npm 上的 `dsh-updater-npm`
+  最新版检查（`GET https://registry.npmjs.org/dsh-updater-npm/latest`，10 分钟缓存）。
+- 若插件自身有新版本，卡片会显示红色提示：**先更新插件，再升级 DSH**，并给出可直接复制
+  的命令（`dsh plugin --profile <你的 profile> add dsh-updater-npm@<最新版>`）。
+  此时**「通过 npm 更新」按钮被禁用**；即使绕过界面直接调 `/update`，宿主端也会拒绝并返回
+  同一条提示。
+- 原因：升级 DSH 的动作是由**当前运行的插件代码**执行的，旧版插件的升级流程本身就可能有问题
+  （例如 1.9.0 在 Windows 上 staged 安装缺 `-g`，交换后会丢掉新版本的依赖）。
+- **离线性放行**：registry 不可达或版本未知时不会拦截，只在「确定存在更新版插件」时才拦，
+  避免内网/离线环境被误锁。
+- 源码树模式（`git pull` 更新）不受此闸门影响，只显示提示。
+
 ### DSH 文档
 
 - **同步开关（默认关闭）**：设置页「DSH 文档」卡片顶部有「自动同步官方文档」开关。
@@ -116,6 +130,17 @@ dsh plugin --profile web add github:SiriusWJ/dsh-updater-npm
 
 ## 更新日志
 
+### v1.11.0
+
+- **新增**：卡片显示插件自身版本号，并对照 npm 最新版检查；
+  有新版本时给出「先更新插件再升级 DSH」的提示与可复制的确切命令。
+- **新增**：插件自身过旧时**禁用「通过 npm 更新」按钮**，宿主端 `/update` 也会拒绝
+  （回退放行：registry 不可达时不拦，避免离线环境被误锁）。
+  理由：升级 DSH 由当前插件代码执行，旧插件的升级流程本身可能有问题。
+- **新增**：`test/smoke.mjs` 增加第 7、8 节——`apply()` mock 挂载 + **真调 `/check`
+  handler** 校验载荷字段（插件版本、破坏性变更、上次重启、遗留文件），共 36 项。
+- 其它：测试框架改为顺序 await，async 断言不再被漏计。
+
 ### v1.10.0
 
 基于 0.1.2-rc.1 → 0.1.5-rc.1 跨版本升级实战的加固：
@@ -190,5 +215,10 @@ dsh plugin --profile web add github:SiriusWJ/dsh-updater-npm
 - Cross-version jumps with known breaking changes (currently `0.1.5`: V3 session format,
   persona `text` → `prefix`/`suffix`, plugin API/slot changes) show a notice with a
   release-notes link.
+- The card shows **this plugin's own version** and compares it with npm. While the plugin
+  itself is outdated the "Update via npm" button is disabled and `/update` is refused with
+  the exact command to run first (`dsh plugin --profile <name> add dsh-updater-npm@<latest>`),
+  because updating DSH is performed by the plugin code itself. The gate only engages when a
+  newer plugin version is positively known (registry unreachable ⇒ no block).
 
 **Changelog:** see the 更新日志 section above. Tests: `node test/smoke.mjs`.
