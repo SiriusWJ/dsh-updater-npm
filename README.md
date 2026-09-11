@@ -72,16 +72,66 @@ dsh plugin --profile web add github:SiriusWJ/dsh-updater-npm
 
 > 版本回退排查：若"更新后显示一致、重启后回到旧版"，说明运行的是源码树而 npm 更新只改了全局安装。切换为 npm-global 启动（如桌面快捷方式指向 `D:\tools\node22\dsh.cmd web`）后更新即生效。
 
+## 升级安全网
+
+> 以下是 0.1.2-rc.1 → 0.1.5-rc.1 一次真实跨版本升级踩坑后逐条补上的防护，v1.10.0 起生效。
+
+1. **暂存安装必须带 `-g`（结构一致性）**：`npm install --prefix <staging>`（不带 `-g`）
+   产出的是**提升（hoisted）**布局，而现网 npm 全局部署是**嵌套**布局
+   （`@deepseek-ai/dsh/node_modules/...`，包目录自包含）。交换脚本只搬包目录，
+   不带 `-g` 就等于**把新部署的依赖全部丢掉**。现在命令固定带 `-g`，并在写「待交换」
+   标记前校验：现网嵌套则暂存必须是嵌套，且用运行实例自带的 node 执行
+   `lib/bin.js --version` 确认新包真能跑起来——任一环节不过就中止（不改部署、不重启）。
+2. **交换校验先于杀进程**：重启脚本在结束当前进程**之前**校验暂存包（存在性 + 结构一致性），
+   不通过则 `exit 1` —— 旧进程继续运行，不会出现「杀完了却换不了」的半死状态。
+3. **旧部署保留为回滚点**：交换后旧目录改名为 `dsh.old-<时间戳>` **保留**（不再立即删除），
+   并写回重启结果；确认新版稳定后自行删除即可。
+4. **改名重试**：刚被结束的进程/子进程可能短暂持有目录句柄，改名最多重试 5 次（每次 3 秒）。
+5. **升级前自动备份**：真正会变版本时，先把 `settings.yaml`、`.credentials.yaml`、
+   `.agent-presets/`、各 profile 的 `package.json`/`cordis*.yml`/`pnpm-lock.yaml` 等快照到
+   `$DSH_HOME/upgrade-backups/dsh-<from>-to-<to>-<时间戳>/`；会话日志在上限 256 MB 以内时一并复制
+   （升级后会话会迁移到新格式且**不可降级读取**，备份价值最高）。自动保留最近 5 份。
+6. **重启后找回新激活地址**：DSH 0.1.5 起 Web 鉴权 cookie 由「本次激活」的密钥签名，
+   重启即失效。重启脚本现在会把新进程的 stdout/stderr 重定向到文件、抓取新的
+   `http://…/?token=…` 地址写入 `plugin-data/dsh-updater-npm/activation-url.txt` 并自动打开浏览器；
+   设置页卡片也会显示「上次重启」结果和可点击的新地址。
+7. **遗留文件检测与一键清理**：`/check` 会报告未被引用的 `staging-*`/`repair-*` 遗留目录
+   （实测有一次未完成的更新留下 **222 MB**）和 npm 中断安装残留的 `.<name>-<hash>` 目录
+   （实测 **65 MB** 级）；卡片出现「清理遗留文件」按钮，粘滞超过 6 小时的暂存目录也会在启动时自动回收。
+8. **跨版本破坏性变更提示**：目标版本跨已知的破坏性区间（当前登记 `0.1.5`：
+   会话格式 V3 不可降级、persona `text` → `prefix`/`suffix`、插件 API 与槽位变更）时，
+   卡片会显示提示并提供 release notes 链接。
+
 ## 路由
 
-- `GET  /dsh-updater-npm/check` —— 更新检查（10 分钟缓存）
-- `POST /dsh-updater-npm/update` —— 执行 npm 更新（同源保护）
+- `GET  /dsh-updater-npm/check` —— 更新检查（10 分钟缓存；附带跨版本提示、上次重启结果、遗留文件汇总）
+- `POST /dsh-updater-npm/update` —— 执行 npm 更新（同源保护；先自动备份再暂存）
 - `POST /dsh-updater-npm/restart` —— 重启当前 DSH 实例（同源保护；若有待交换暂存包则先原子替换部署再重启，支持 Windows/macOS/Linux）
+- `POST /dsh-updater-npm/cleanup` —— 清理遗留暂存目录与 npm 安装残留（同源保护）
 - `GET  /dsh-updater-npm/progress` —— 更新/同步实时进度（轮询）
 - `GET  /dsh-updater-npm/docs/status` —— 文档同步状态
 - `POST /dsh-updater-npm/docs/sync` —— 触发文档同步（同源保护）
 - `GET  /dsh-updater-npm/docs/search?q=&lang=&limit=` —— 本地索引搜索
 - `GET  /dsh-updater-npm/docs/read?path=&section=` —— 读取文档
+
+## 更新日志
+
+### v1.10.0
+
+基于 0.1.2-rc.1 → 0.1.5-rc.1 跨版本升级实战的加固：
+
+- **修复（严重）**：Windows staged 更新的暂存安装缺 `-g`，产出提升布局而现网是嵌套布局，
+  交换后会丢掉新部署的全部依赖。现在固定 `-g`，并在交换前校验结构一致性与可执行性。
+- **修复**：重启脚本的暂存校验现在发生在结束进程之前，校验不过就整体放弃（旧进程不受影响）。
+- **修复**：交换后不再立即删除旧部署，保留为 `dsh.old-<时间戳>` 回滚点。
+- **修复**：目录改名增加重试，避免刚结束的子进程短暂持锁导致交换失败。
+- **新增**：升级前自动备份（配置 + 预设 + 体积允许时的会话日志），保留最近 5 份。
+- **新增**：重启后重定向输出、抓取并自动打开新的激活地址，卡片展示上次重启结果。
+- **新增**：遗留暂存目录/过期脚本的启动自动回收 + `/cleanup` 路由与「清理遗留文件」按钮；
+  `/check` 汇报遗留目录与 npm 安装残留的体积。
+- **新增**：跨版本破坏性变更提示与 release notes 链接。
+- **新增**：`test/smoke.mjs`（26 项：含在临时目录里真跑生成的 PowerShell 交换脚本）。
+- 其它：`readJson` 容忍 UTF-8 BOM（PowerShell `Set-Content` 默认写 BOM）。
 
 ## License
 
@@ -119,3 +169,26 @@ dsh plugin --profile web add dsh-updater-npm
 # or
 dsh plugin --profile web add github:SiriusWJ/dsh-updater-npm
 ```
+
+**Upgrade safety net (v1.10.0, learned from a real 0.1.2 → 0.1.5 upgrade):**
+
+- The Windows staged install now always passes `-g` and verifies that the staged tree
+  matches the live layout (a hoisted staging tree would otherwise lose every dependency
+  once swapped into a nested npm-global deployment) plus that the staged `lib/bin.js`
+  actually runs — a failed check aborts before the running process is touched.
+- The restart script validates the staging package *before* killing the server, retries the
+  directory rename, and keeps the previous deployment as `dsh.old-<stamp>` (a rollback point).
+- Every version-changing update writes a pre-upgrade backup (`settings.yaml`,
+  `.credentials.yaml`, `.agent-presets/`, profile config, and session logs up to 256 MB)
+  to `$DSH_HOME/upgrade-backups/`, keeping the newest 5.
+- After a restart the script captures the new `?token=` activation URL (the auth cookie is
+  signed per activation since 0.1.5) into `plugin-data/dsh-updater-npm/activation-url.txt`
+  and opens it in the browser; the card shows the last restart result.
+- `/check` reports leftover `staging-*` directories (one real case was 222 MB) and npm
+  install leftovers (`.<name>-<hash>`, 65 MB in a real case); `POST /dsh-updater-npm/cleanup`
+  removes them, and stale staging directories are also reclaimed automatically at startup.
+- Cross-version jumps with known breaking changes (currently `0.1.5`: V3 session format,
+  persona `text` → `prefix`/`suffix`, plugin API/slot changes) show a notice with a
+  release-notes link.
+
+**Changelog:** see the 更新日志 section above. Tests: `node test/smoke.mjs`.

@@ -75,6 +75,22 @@ window.__ModuleLoader__.load({
       restartLaunched: "✅ 已触发重启：DSH 即将退出并自动重新启动…",
       restartFail: "重启失败: ",
       deployBrokenWarn: "⚠️ 部署目录不完整（可能是上次更新中断），重启后可能无法启动。建议点击「修复部署」重新安装当前版本。",
+    breakingTitle: "跨版本升级注意",
+    releaseNotesLink: "查看 release notes",
+    lastRestartOk: "上次重启：已交换并启动 v{version}",
+    lastRestartFail: "上次重启：交换失败，已自动回滚到原部署",
+    lastRestartPlain: "上次重启：仅重启，未交换版本",
+    activationHint: "新激活地址（浏览器需用它重新授权）",
+    openBtn: "打开",
+    backupCreated: "升级前配置已备份到 {dir}",
+    backupSessionsCopied: "会话日志已一并备份（{mb} MB）",
+    backupSessionsSkipped: "会话日志过大（{mb} MB）未备份",
+    stagingWasteFound: "检测到 {n} 个遗留暂存目录 / {mb} MB（未完成更新留下的）",
+    npmResidualFound: "发现 npm 安装残留 {n} 个 / {mb} MB",
+    cleanupBtn: "清理遗留文件",
+    cleanupRunning: "正在清理…",
+    cleanupDone: "✅ 已清理 {n} 项，释放 {mb} MB",
+    cleanupFail: "清理失败: ",
       repairBtn: "修复部署（重装当前版本）",
       repairRunning: "正在修复部署…（重装当前版本，完成后点击「重启 DSH」生效）",
       repairDone: "✅ 部署已修复——点击「重启 DSH」使其生效",
@@ -177,6 +193,22 @@ window.__ModuleLoader__.load({
       restartLaunched: "✅ Restart triggered — DSH will exit and relaunch itself…",
       restartFail: "Restart failed: ",
       deployBrokenWarn: "⚠️ The deployment directory is incomplete (possibly an interrupted update) — DSH may fail to start after a restart. Click \"Repair deployment\" to reinstall the current version.",
+    breakingTitle: "Cross-version upgrade notice",
+    releaseNotesLink: "View release notes",
+    lastRestartOk: "Last restart: swapped and started v{version}",
+    lastRestartFail: "Last restart: the swap failed and the previous deployment was restored",
+    lastRestartPlain: "Last restart: restarted without swapping a version",
+    activationHint: "New activation URL (the browser must use it to re-authenticate)",
+    openBtn: "Open",
+    backupCreated: "Pre-upgrade backup written to {dir}",
+    backupSessionsCopied: "Session logs backed up too ({mb} MB)",
+    backupSessionsSkipped: "Session logs were too large ({mb} MB) and were not backed up",
+    stagingWasteFound: "Found {n} leftover staging director(y/ies), {mb} MB (from an unfinished update)",
+    npmResidualFound: "Found {n} npm install leftover(s), {mb} MB",
+    cleanupBtn: "Clean leftovers",
+    cleanupRunning: "Cleaning…",
+    cleanupDone: "✅ Cleaned {n} item(s), freed {mb} MB",
+    cleanupFail: "Cleanup failed: ",
       repairBtn: "Repair deployment (reinstall current version)",
       repairRunning: "Repairing the deployment… (reinstalls the current version; click \"Restart DSH\" when done)",
       repairDone: "✅ Deployment repaired — click \"Restart DSH\" to apply",
@@ -362,6 +394,10 @@ window.__ModuleLoader__.load({
         var rr0 = react.useState(null)
         var restart = rr0[0]
         var setRestart = rr0[1]
+        // 遗留文件清理状态（遗留暂存目录 / npm 安装残留）
+        var cl0 = react.useState(null)
+        var cleanup = cl0[0]
+        var setCleanup = cl0[1]
 
         var applyData = function (data) {
           applyHasUpdate(data)
@@ -470,6 +506,14 @@ window.__ModuleLoader__.load({
             .catch(function (error) { setRestart({ phase: "done", result: { ok: false, error: String((error && error.message) || error) } }) })
         }
 
+        var runCleanup = function () {
+          setCleanup({ phase: "running", result: null })
+          fetch("/dsh-updater-npm/cleanup?uilang=" + uiLang(), { method: "POST", cache: "no-store", signal: AbortSignal.timeout(180000) })
+            .then(function (r) { return r.json() })
+            .then(function (result) { setCleanup({ phase: "done", result: result }); runCheck() })
+            .catch(function (error) { setCleanup({ phase: "done", result: { ok: false, error: String((error && error.message) || error) } }) })
+        }
+
         var runNotes = function () {
           var target = RELEASES_URL
           if (typeof window !== "undefined" && window.open) {
@@ -495,6 +539,14 @@ window.__ModuleLoader__.load({
           return el("div", { style: rowStyle },
             el("span", { style: labelStyle }, label),
             el("span", { style: mono ? monoStyle : undefined }, value === null || value === undefined ? "—" : String(value)))
+        }
+
+        function fmtMb(bytes) {
+          return String(Math.round((Number(bytes) || 0) / 1048576 * 10) / 10)
+        }
+
+        function linkOut(href, label) {
+          return el("a", { href: href, target: "_blank", rel: "noreferrer", style: { color: "#3b82f6", textDecoration: "underline" } }, label)
         }
 
         var statusLine
@@ -554,10 +606,18 @@ window.__ModuleLoader__.load({
             } else if (update.result.staged) {
               updateLine = el("div", null,
                 el("div", { style: okStyle }, t("stagedReady", { version: update.result.version })),
-                el("div", { style: Object.assign({ marginTop: 4 }, warnStyle) }, t("restartHint")))
+                el("div", { style: Object.assign({ marginTop: 4 }, warnStyle) }, t("restartHint")),
+                update.result.backupDir ? el("div", { style: { marginTop: 4, fontSize: 12, opacity: 0.8 } },
+                  t("backupCreated", { dir: update.result.backupDir })) : null,
+                update.result.backupSessions === "copied" ? el("div", { style: { marginTop: 2, fontSize: 12, opacity: 0.8 } },
+                  t("backupSessionsCopied", { mb: fmtMb(update.result.backupSessionsBytes) })) : null,
+                update.result.backupSessions === "skipped" ? el("div", { style: Object.assign({ marginTop: 2 }, warnStyle) },
+                  t("backupSessionsSkipped", { mb: fmtMb(update.result.backupSessionsBytes) })) : null)
             } else if (update.result.updated) {
               updateLine = el("div", null,
                 el("div", { style: okStyle }, t("updated", { from: update.result.beforeVersion, to: update.result.version })),
+                update.result.backupDir ? el("div", { style: { marginTop: 4, fontSize: 12, opacity: 0.8 } },
+                  t("backupCreated", { dir: update.result.backupDir })) : null,
                 el("div", { style: Object.assign({ marginTop: 4 }, warnStyle) },
                   t("restartHint")))
             } else {
@@ -628,6 +688,31 @@ window.__ModuleLoader__.load({
             t("pwshMissingHint")) : null,
           data && data.ok && data.deployBroken ? el("div", { style: { marginTop: 4, fontSize: 12, color: "#c62828" } },
             t("deployBrokenWarn")) : null,
+          data && data.ok && data.breakingText ? el("div", { style: { marginTop: 6, padding: "8px 10px", borderRadius: 8, background: "rgba(178,106,0,.12)", fontSize: 12, color: "#b26a00" } },
+            el("div", { style: { fontWeight: 600 } }, "⚠️ " + t("breakingTitle")),
+            el("div", { style: { marginTop: 2, lineHeight: 1.5 } }, data.breakingText),
+            data.releaseUrl ? el("div", { style: { marginTop: 4 } }, linkOut(data.releaseUrl, t("releaseNotesLink"))) : null) : null,
+          data && data.ok && data.lastRestart ? el("div", { style: { marginTop: 5, fontSize: 12 } },
+            el("div", { style: data.lastRestart.swapped && !data.lastRestart.swapOk ? errStyle : okStyle },
+              data.lastRestart.swapped
+                ? (data.lastRestart.swapOk ? t("lastRestartOk", { version: data.lastRestart.version || "?" }) : t("lastRestartFail"))
+                : t("lastRestartPlain")),
+            data.lastRestart.url ? el("div", { style: { marginTop: 2, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" } },
+              el("span", { style: { opacity: 0.75 } }, t("activationHint")),
+              linkOut(data.lastRestart.url, t("openBtn"))) : null) : null,
+          data && data.ok && data.stagingWaste ? el("div", { style: { marginTop: 5, fontSize: 12, color: "#b26a00" } },
+            "⚠️ " + t("stagingWasteFound", { n: data.stagingWaste.count, mb: fmtMb(data.stagingWaste.bytes) })) : null,
+          data && data.ok && data.npmResiduals ? el("div", { style: { marginTop: 5, fontSize: 12, color: "#b26a00" } },
+            "⚠️ " + t("npmResidualFound", { n: data.npmResiduals.count, mb: fmtMb(data.npmResiduals.bytes) })) : null,
+          data && data.ok && (data.stagingWaste || data.npmResiduals) ? el("div", { style: { display: "flex", gap: 8, marginTop: 6, alignItems: "center", flexWrap: "wrap" } },
+            el("button", { style: btnStyle, onClick: runCleanup, disabled: cleanup !== null && cleanup.phase === "running" },
+              cleanup !== null && cleanup.phase === "running" ? t("cleanupRunning") : t("cleanupBtn")),
+            cleanup !== null && cleanup.phase === "done"
+              ? el("div", { style: cleanup.result && cleanup.result.ok ? okStyle : errStyle },
+                  cleanup.result && cleanup.result.ok
+                    ? t("cleanupDone", { n: cleanup.result.files, mb: fmtMb(cleanup.result.bytes) })
+                    : t("cleanupFail") + ((cleanup.result && cleanup.result.error) || t("unknownError")))
+              : null) : null,
           updateLine,
           restartReady ? el("div", { style: { display: "flex", gap: 8, marginTop: 8, alignItems: "center", flexWrap: "wrap" } },
             el("button", { style: primaryBtnStyle, onClick: runRestart, disabled: restart !== null && restart.phase === "running" },
