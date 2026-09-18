@@ -348,6 +348,152 @@ check('/check 载荷包含插件版本与全部安全网字段', async () => {
   assert.ok('lastRestart' in body && 'stagingWaste' in body && 'npmResiduals' in body, 'safety fields missing')
 })
 
+// ── 9. 超时策略与运行日志（1.12：10 分钟硬超时 → 空闲超时 + 硬上限）─────────
+section('9) 超时策略（空闲看门狗）与运行日志')
+const cfgFile = join(sandboxHome, 'plugin-data', 'dsh-updater-npm', 'config.json')
+check('默认配置：空闲 5 分钟判卡死、总上限 60 分钟', () => {
+  const cfg = t.readPluginConfig()
+  assert.equal(cfg.npmIdleMinutes, 5)
+  assert.equal(cfg.npmTimeoutMinutes, 60)
+})
+check('配置可覆盖，非法值回退默认（不炸）', () => {
+  mkdirSync(dirname(cfgFile), { recursive: true })
+  writeFileSync(cfgFile, JSON.stringify({ docsEnabled: false, npmIdleMinutes: 12, npmTimeoutMinutes: 90 }))
+  let cfg = t.readPluginConfig()
+  assert.equal(cfg.npmIdleMinutes, 12)
+  assert.equal(cfg.npmTimeoutMinutes, 90)
+  writeFileSync(cfgFile, JSON.stringify({ npmIdleMinutes: 0, npmTimeoutMinutes: 'abc' }))
+  cfg = t.readPluginConfig()
+  assert.equal(cfg.npmIdleMinutes, 5, '0 应回退默认')
+  assert.equal(cfg.npmTimeoutMinutes, 60, '非数字应回退默认')
+})
+check('writeDocsConfig 合并写入，不抹掉超时配置', () => {
+  writeFileSync(cfgFile, JSON.stringify({ npmIdleMinutes: 20, npmTimeoutMinutes: 120 }))
+  t.writeDocsConfig({ docsEnabled: true })
+  const cfg = t.readPluginConfig()
+  assert.equal(cfg.docsEnabled, true)
+  assert.equal(cfg.npmIdleMinutes, 20, '超时配置被抹掉了')
+  assert.equal(cfg.npmTimeoutMinutes, 120)
+  t.writeDocsConfig({ docsEnabled: false })
+})
+check('慢速但持续输出的安装不会被杀（旧版 10 分钟一刀切会误杀）', async () => {
+  const script = 'let n=0; const i=setInterval(()=>{ console.log("tick"+(++n)); if(n>=8){ clearInterval(i) } }, 120)'
+  const res = await t.runInstallCmd([process.execPath, '-e', script], null, { idleMs: 1500, hardMs: 60000 })
+  assert.equal(res.ok, true, 'streaming install must survive: ' + String(res.error || ''))
+  assert.equal(res.timedOut, null)
+  assert.ok(res.elapsedMs >= 800, 'should have streamed for ~1s, got ' + String(res.elapsedMs))
+})
+check('无输出超时 → idle 看门狗终止（不是 10 分钟硬砍）', async () => {
+  const res = await t.runInstallCmd([process.execPath, '-e', 'console.log("once"); setTimeout(()=>{}, 30000)'], null, { idleMs: 700, hardMs: 60000 })
+  assert.equal(res.ok, false)
+  assert.equal(res.timedOut, 'idle')
+})
+check('持续输出但超过总上限 → hard 看门狗终止', async () => {
+  const script = 'setInterval(()=>{ console.log("tick") }, 100); setTimeout(()=>{}, 30000)'
+  const res = await t.runInstallCmd([process.execPath, '-e', script], null, { idleMs: 60000, hardMs: 800 })
+  assert.equal(res.ok, false)
+  assert.equal(res.timedOut, 'hard')
+})
+check('运行日志留痕：按行、剥 ANSI、\\r 覆盖行只留最后一段', () => {
+  t.opLogReset()
+  t.opLogFeed('\u001b[32mgreen line\u001b[0m\n')
+  t.opLogFeed('progress 10%\rprogress 80%\rprogress 100%\npartial')
+  t.opLogFeed(' rest\n')
+  const snap = t.opLogSince(0)
+  assert.deepEqual(snap.lines, ['green line', 'progress 100%', 'partial rest'])
+  assert.equal(snap.dropped, 0)
+  assert.equal(snap.total, 3)
+})
+check('日志增量语义：since=total 时不再重传', () => {
+  t.opLogReset()
+  t.opLogNote('a')
+  t.opLogNote('b')
+  const first = t.opLogSince(0)
+  assert.deepEqual(first.lines, ['a', 'b'])
+  const second = t.opLogSince(first.total)
+  assert.deepEqual(second.lines, [])
+  t.opLogNote('c')
+  assert.deepEqual(t.opLogSince(first.total).lines, ['c'])
+})
+check('日志有界：超过上限后裁掉最旧的行，游标仍连续', () => {
+  t.opLogReset()
+  for (let i = 0; i < 900; i += 1) t.opLogNote('line-' + i)
+  const snap = t.opLogSince(0)
+  assert.ok(snap.lines.length <= 800, 'lines=' + snap.lines.length)
+  assert.ok(snap.dropped > 0, 'expected trimming')
+  assert.equal(snap.total, snap.dropped + snap.lines.length)
+  assert.equal(snap.lines[snap.lines.length - 1], 'line-899')
+})
+check('/progress 载荷带日志增量与超时设置', async () => {
+  const routes = []
+  const ctx = {
+    get: () => undefined,
+    on: () => {},
+    effect: (fn) => { fn(); return () => {} },
+    inject: (deps, fn) => { fn(ctx) },
+    timer: { interval: () => () => {}, timeout: async () => {} },
+    webServer: { register: (r) => { routes.push(r); return () => {} } },
+  }
+  mod.apply(ctx)
+  const route = routes.find((r) => r.path === '/dsh-updater-npm/progress')
+  assert.ok(route !== undefined, 'progress route missing')
+  t.opLogReset()
+  t.opLogNote('hello progress')
+  const rec = {}
+  route.handler({ method: 'GET', url: '/dsh-updater-npm/progress?since=0', headers: {} }, {
+    writeHead: (code) => { rec.code = code },
+    end: (body) => { rec.body = body },
+  })
+  for (let i = 0; i < 40 && rec.body === undefined; i += 1) await new Promise((r) => setTimeout(r, 25))
+  assert.ok(rec.body !== undefined, 'progress handler did not respond')
+  const body = JSON.parse(rec.body)
+  assert.deepEqual(body.log.lines, ['hello progress'])
+  assert.equal(typeof body.log.total, 'number')
+  assert.equal(typeof body.limits.npmIdleMinutes, 'number')
+})
+
+// ── 10. 客户端 bundle 装载（日志面板所在文件必须能被加载并挂载）─────────────
+section('10) 客户端 bundle 装载')
+check('client.js 可加载，factory 与其 apply() 都能跑（注册 settings.section）', async () => {
+  const loaded = []
+  globalThis.window = { __ModuleLoader__: { load: (def) => loaded.push(def) } }
+  await import(new URL('../client/client.js', import.meta.url).href)
+  assert.equal(loaded.length, 1, 'bundle 未调用 __ModuleLoader__.load')
+  assert.equal(loaded[0].id, 'dsh-updater-npm')
+  const reactStub = {
+    createElement: function () { return { args: Array.prototype.slice.call(arguments) } },
+    useState: (v) => [v, () => {}],
+    useEffect: () => {},
+    useRef: (v) => ({ current: v }),
+  }
+  const bundle = loaded[0].factory((id) => {
+    if (id === 'react') return reactStub
+    throw new Error('unexpected require: ' + id)
+  })
+  assert.equal(typeof bundle.apply, 'function')
+  assert.equal(bundle.name, 'dsh-updater-npm')
+  assert.deepEqual(bundle.inject, ['slots', 'timer', 'locale'])
+  const registered = []
+  const services = {
+    slots: {
+      inject: (name, fn) => fn(),
+      register: (meta) => { registered.push(meta); return () => {} },
+    },
+    timer: { interval: () => () => {} },
+    // locale 故意缺席：走内置中文兜底分支（真实环境由壳程序注入）
+  }
+  const ctx = {
+    get: (name) => services[name],
+    effect: (fn) => { const d = fn(); return typeof d === 'function' ? d : () => {} },
+    inject: (deps, fn) => { fn(ctx) },
+  }
+  bundle.apply(ctx)
+  assert.equal(registered.length, 1, 'expected 1 slot registration, got ' + registered.length)
+  assert.equal(registered[0].name, 'settings.section')
+  assert.equal(registered[0].id, 'dsh-update-local')
+  delete globalThis.window
+})
+
 await chain
 rmSync(root, { recursive: true, force: true })
 rmSync(sandboxHome, { recursive: true, force: true })

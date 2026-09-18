@@ -33,8 +33,39 @@ dsh plugin --profile web add github:SiriusWJ/dsh-updater-npm
 
 - 自动检查每 30 分钟一次（页面每 60 秒刷新缓存结果）。
 - 检测到新版本时，设置页左侧导航「DSH 更新」旁会显示一个**红色小圆点**（🔴）。
-- 点击「通过 npm 更新」执行 `npm install -g @deepseek-ai/dsh@latest`，期间显示**实时进度**（npm 输出尾部），完成后出现**「重启 DSH」按钮**——点击后按原启动命令自动退出并重新拉起（**跨平台**：Windows 用 PowerShell，macOS/Linux 用 `/bin/sh`；源码树更新与部署修复完成后同样提供该按钮）。
+- 点击「通过 npm 更新」执行 `npm install -g @deepseek-ai/dsh@latest`，期间显示**实时进度**，
+  并附一个**可滚动的运行日志面板**（完整 npm 输出逐行滚动、自动贴底、可暂停自动滚动、
+  一键复制、可折叠；行数上限 800 行 / 128 KB，超出只裁最旧的行）。
+  **失败后日志仍留在界面上**，用于事后定位。
+- 更新完成后出现**「重启 DSH」按钮**——点击后按原启动命令自动退出并重新拉起（**跨平台**：Windows 用 PowerShell，macOS/Linux 用 `/bin/sh`；源码树更新与部署修复完成后同样提供该按钮）。
 - 版本比较为 semver 风格：本地比远端新（如 rc.7 vs rc.6）时不会误报更新。
+
+### 超时策略与运行日志（v1.12 起）
+
+旧版对 npm 安装用「10 分钟一刀切」硬超时。慢速网络下 staged 安装实测会在 9 分 25 秒
+只完成 247 个 tarball（222 MB 依赖树的 231/239 个 `@deepseek-ai` 子包）后被杀掉，
+报错还只是一句 `暂存安装失败: npm`——**既不是卡死，也不是网络不通，就是撞了硬超时**。
+
+现在改为双阈值看门狗，并可通过 `$DSH_HOME/plugin-data/dsh-updater-npm/config.json` 调整：
+
+```json
+{
+  "docsEnabled": false,
+  "npmIdleMinutes": 5,
+  "npmTimeoutMinutes": 60
+}
+```
+
+| 键 | 默认 | 含义 |
+| --- | --- | --- |
+| `npmIdleMinutes` | `5` | 连续多少分钟**完全无输出**才判定卡死并终止（慢但一直在下载 → 不会被杀） |
+| `npmTimeoutMinutes` | `60` | 总时长硬上限，兜底防止无限挂起 |
+
+- 超时被杀时，日志里会留 `[watchdog] …` 与 `[exit] …` 两行，错误信息直接说明是
+  **空闲超时**还是**总时长超限**，并提示该调哪个键，不再是含义不明的 `: npm`。
+- 同一套策略覆盖：staged 安装、非 Windows 原地 `npm install -g`、源码树 `pnpm/npm install`；
+  `msiexec /qn` 静默安装因为没有输出，单独放宽到 10 分钟空闲判定。
+- `/dsh-updater-npm/progress?since=<行号游标>` 只回传增量行，轮询不重传整份日志。
 
 ### 插件自身版本与自更新闸门
 
@@ -129,6 +160,27 @@ dsh plugin --profile web add github:SiriusWJ/dsh-updater-npm
 - `GET  /dsh-updater-npm/docs/read?path=&section=` —— 读取文档
 
 ## 更新日志
+
+### v1.12.0
+
+修掉「慢速网络下更新必然失败」的真实故障（0.1.5-rc.1 → rc.2 实测：18:25:31 起
+npm，9 分 25 秒下载了 247 个 tarball 后在 10 分钟整被杀，暂存目录随即清理，
+界面只显示 `暂存安装失败: npm`）：
+
+- **修复（严重）**：npm 安装的 10 分钟硬超时改为**空闲超时（默认 5 分钟无输出）+
+  总时长硬上限（默认 60 分钟）**。只要有输出就不会被杀，真卡死仍会被终止。
+- **修复**：超时/卡死的错误信息不再退化成 `: npm`，而是明确写出原因、已运行时长
+  与应调整的配置键。
+- **新增**：**运行日志滚动面板**——npm/git 输出逐行留痕（上限 800 行 / 128 KB，
+  剥 ANSI、合并 `\r` 覆盖行），实时滚动、自动贴底、滚动即暂停、一键复制、可折叠；
+  **失败后日志保留**，不再随进度区一起被清空。更新/修复/源码更新/PowerShell 安装共用。
+- **新增**：`/progress?since=<游标>` 增量返回日志行，客户端 1.5 秒轮询不重传历史。
+- **新增**：配置项 `npmIdleMinutes` / `npmTimeoutMinutes`（`config.json`，
+  与 `docsEnabled` 同文件；写开关时**合并写入**，不会抹掉超时配置）。
+- **重构**：源码树的依赖安装不再自带第三份 10 分钟硬超时，统一复用同一套看门狗。
+- 测试：`test/smoke.mjs` 增加第 9、10 节（共 47 项）——真跑子进程验证
+  「慢速但持续输出不会被杀」「无输出 → idle 终止」「超上限 → hard 终止」、
+  日志留痕与增量语义、`/progress` 载荷字段、客户端 bundle 可装载可挂载。
 
 ### v1.11.0
 
