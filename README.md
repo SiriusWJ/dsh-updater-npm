@@ -14,6 +14,8 @@ Two cards in Settings:
 - **DSH Update (npm)** — checks the latest `@deepseek-ai/dsh` on npm and updates it in one click, with live progress and a "Restart DSH" button that performs the staged swap.
 - **DSH Docs (official)** — incrementally syncs `deepseek-ai/deepseek-harness` `docs/` to `$DSH_HOME/docs-sync/` (skips unchanged files by GitHub blob sha) with a progress bar, and registers the `dsh_docs_search` / `dsh_docs_read` model tools.
 
+![The DSH Update and DSH Docs cards in Settings](https://raw.githubusercontent.com/SiriusWJ/dsh-updater-npm/master/docs/dsh-update-card-1.13.png)
+
 [Install](#install) · [Usage](#usage) · [Run modes](#run-modes) · [Upgrade safety net](#upgrade-safety-net) · [Routes](#routes) · [License](#license)
 
 ## Install
@@ -210,6 +212,15 @@ The plugin detects the **run mode** and behaves honestly:
 - `GET  /dsh-updater-npm/docs/read?path=&section=` — read one document
 
 ## Changelog
+
+### v1.13.3
+
+- **Docs only — no code changes.**
+- Added a screenshot of both Settings cards to the README, taken from the running v1.13.2 build: it shows
+  the current card layout (no run-log panel, no activation-URL line) and the plugin's own version row.
+  The stale screenshot (which still showed the removed run-log panel) was dropped in v1.13.1; its
+  replacement is `docs/dsh-update-card-1.13.png`. The version in the file name is deliberate — GitHub's
+  raw CDN keeps serving the old bytes for a while when a file is overwritten.
 
 ### v1.13.2
 

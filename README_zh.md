@@ -13,6 +13,8 @@ DSH 更新器 + 官方文档同步器，用于 [DeepSeek Harness (dsh)](https://
 - **DSH 更新（npm）**：自动检查 `@deepseek-ai/dsh` 的 npm 最新版本，一键更新，带实时进度与完成交换的「重启 DSH」按钮。
 - **DSH 文档（官方）**：把 `deepseek-ai/deepseek-harness` 官方 `docs/` **增量同步**到 `$DSH_HOME/docs-sync/`（按 GitHub blob sha 跳过未变文件），带进度条，并提供 `dsh_docs_search` / `dsh_docs_read` 两个模型工具。
 
+![设置页的「DSH 更新」与「DSH 文档」卡片](https://raw.githubusercontent.com/SiriusWJ/dsh-updater-npm/master/docs/dsh-update-card-1.13.png)
+
 [安装](#安装) · [使用](#使用) · [运行模式](#运行模式) · [升级安全网](#升级安全网) · [路由](#路由) · [License](#license)
 
 ## 安装
@@ -185,6 +187,14 @@ dsh plugin --profile web add github:SiriusWJ/dsh-updater-npm
 - `GET  /dsh-updater-npm/docs/read?path=&section=` —— 读取文档
 
 ## 更新日志
+
+### v1.13.3
+
+- **仅文档改动，无代码变更。**
+- README 加入设置页两张卡片的截图（取自正在运行的 1.13.2 构建）：可见当前卡片形态
+  （没有运行日志面板、没有激活地址行）以及「插件版本」一行。v1.13.1 删掉的旧截图
+  （图中还是已移除的日志面板）由 `docs/dsh-update-card-1.13.png` 接替；文件名里带版本号是故意的，
+  否则 GitHub raw CDN 会在一段时间内继续返回旧图。
 
 ### v1.13.2
 
