@@ -69,5 +69,24 @@ if (process.platform === 'win32') {
   })
 }
 
+console.log('\n=== 4) Windows shell 回退：含空格参数必须自己转义 ===')
+// 回退路径是「裸 npm + shell:true」，而 --prefix / --logs-dir 落在用户目录下；
+// 用户名带空格时（C:\Users\John Smith）Node 不转义参数，cmd 会把路径拆开。
+if (process.platform === 'win32') {
+  const argv = ['--prefix', 'C:\\Users\\a b\\stage', 'config', 'get', 'prefix']
+  const run = (args) => new Promise((resolve) => {
+    const c = spawn('npm', args, { stdio: ['ignore', 'pipe', 'pipe'], shell: true })
+    let out = ''
+    c.stdout.on('data', (d) => { out += d })
+    c.stderr.on('data', (d) => { out += d })
+    c.on('error', () => resolve(''))
+    c.on('close', () => resolve(out))
+  })
+  check('quoteWinArg 给含空格参数补引号', t.quoteWinArg('C:\\Users\\a b\\s') === '"C:\\Users\\a b\\s"')
+  check('quoteWinArg 不动普通参数', t.quoteWinArg('install') === 'install')
+  const out = await run(t.shellArgv(argv, true))
+  check('转义后含空格参数完整传给 npm', !/Unknown command/i.test(out), out.trim().slice(0, 120))
+}
+
 console.log('\n' + (failed === 0 ? 'ALL PASSED ✓' : failed + ' FAILED ✗'))
 process.exit(failed === 0 ? 0 : 1)
