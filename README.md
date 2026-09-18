@@ -1,121 +1,319 @@
 # dsh-updater-npm
 
-DSH 更新器 + 官方文档同步器 for [DeepSeek Harness (dsh)](https://github.com/deepseek-ai/deepseek-harness)。
+**English** | [中文](README_zh.md)
 
-设置页提供两个卡片：
+<!-- 文件名故意是 README_zh.md（下划线），不要改回 README.zh.md：
+     npm 用 glob('{README,README.*}') 挑包 readme，README.zh.md 会命中并排在 README.md 之前
+     （它的 markdown 正则是非锚定的，".zh.md" 也算 markdown），结果 npm 页面会显示中文。
+     下划线命名不匹配该模式，npm 才会取 README.md（英文）。 -->
 
-- **DSH 更新（npm）**：自动检查 `@deepseek-ai/dsh` 的 npm 最新版本，一键 `npm install -g @deepseek-ai/dsh@latest`，带**实时进度显示**（npm 输出流）。
-- **DSH 文档（官方）**：把 `deepseek-ai/deepseek-harness` 官方 `docs/` **增量同步**到本地（按 GitHub blob sha 跳过未变文件），带**进度条**（下载 i/total + 当前文件）；并提供 `dsh_docs_search` / `dsh_docs_read` 两个模型工具，开发时可直接在对话中查阅官方文档。
+DSH updater + official docs sync plugin for [DeepSeek Harness (dsh)](https://github.com/deepseek-ai/deepseek-harness).
 
-[English](#english) · [安装](#安装) · [使用](#使用) · [运行模式](#运行模式) · [License](#license)
+Two cards in Settings:
 
-## 安装
+- **DSH Update (npm)** — checks the latest `@deepseek-ai/dsh` on npm and updates it in one click, with live progress and a "Restart DSH" button that performs the staged swap.
+- **DSH Docs (official)** — incrementally syncs `deepseek-ai/deepseek-harness` `docs/` to `$DSH_HOME/docs-sync/` (skips unchanged files by GitHub blob sha) with a progress bar, and registers the `dsh_docs_search` / `dsh_docs_read` model tools.
+
+![The DSH Update and DSH Docs cards in Settings](https://raw.githubusercontent.com/SiriusWJ/dsh-updater-npm/master/docs/dsh-update-card-1.13.png)
+
+[Install](#install) · [Usage](#usage) · [Run modes](#run-modes) · [Upgrade safety net](#upgrade-safety-net) · [Routes](#routes) · [License](#license)
+
+## Install
 
 ```bash
-# 从 npm 安装（推荐）
+# from npm (recommended)
 dsh plugin --profile web add dsh-updater-npm
 
-# 或从 GitHub 安装
+# or from GitHub
 dsh plugin --profile web add github:SiriusWJ/dsh-updater-npm
 ```
 
-安装后重启 dsh web，设置页出现「DSH 更新」和「DSH 文档」两个卡片。
+Restart dsh web afterwards; the "DSH Update" and "DSH Docs" cards appear in Settings.
 
-> **多语言**：界面与宿主端消息支持**中文 / English**，自动跟随系统语言切换
-> （也可在 设置 → 通用 → Language 手动选择）；`dsh_docs_search` /
-> `dsh_docs_read` 工具描述与输出同样跟随系统语言。
+> **i18n:** the UI and every host message support **English / Chinese** and follow the system
+> language automatically (or the manual choice in Settings → General → Language). The
+> `dsh_docs_search` / `dsh_docs_read` tool descriptions and outputs follow it too.
 
-## 使用
+## Usage
 
-### DSH 更新
+### DSH Update
 
-![DSH 更新卡片](https://raw.githubusercontent.com/SiriusWJ/dsh-updater-npm/master/docs/dsh-update-card.png)
+- Checks every 30 minutes (the page refreshes the cached result every 60 s).
+- A **red dot** (🔴) appears next to "DSH Update" in the Settings sidebar when a new version exists.
+- "Update via npm" runs `npm install -g @deepseek-ai/dsh@latest` with live progress (bar + the last
+  few lines of npm output). There is deliberately **no scrolling log panel** — the full npm output
+  is written to `$DSH_HOME/plugin-data/dsh-updater-npm/last-run.log` when the operation ends, so
+  the card stays quiet and the log is still there when you need it.
+- When the update finishes, a **"Restart DSH"** button appears: it exits the current process with
+  the original command line and relaunches it (PowerShell on Windows, `/bin/sh` on macOS/Linux).
+  The same button appears after source-tree updates and deployment repairs.
+  **No new activation URL is needed** — the browser re-authenticates by itself and no new window pops up.
+- Once a swap succeeded (i.e. the new version is actually running) the card shows the **rollback
+  point's disk usage** and a **"Remove rollback point"** button. The previous deployment is kept as
+  `<sibling of install dir>/dsh.old-<timestamp>` (222 MB in a real case). Safety rule, enforced on
+  the host: only rollback points whose **version differs from the running version** are listed and
+  deleted — the live deployment is never touched.
+- Version comparison is semver-style: a local version newer than the remote one (e.g. rc.7 vs rc.6)
+  is not reported as an update.
 
-- 自动检查每 30 分钟一次（页面每 60 秒刷新缓存结果）。
-- 检测到新版本时，设置页左侧导航「DSH 更新」旁会显示一个**红色小圆点**（🔴）。
-- 点击「通过 npm 更新」执行 `npm install -g @deepseek-ai/dsh@latest`，期间显示**实时进度**（npm 输出尾部），完成后出现**「重启 DSH」按钮**——点击后按原启动命令自动退出并重新拉起（**跨平台**：Windows 用 PowerShell，macOS/Linux 用 `/bin/sh`；源码树更新与部署修复完成后同样提供该按钮）。
-- 版本比较为 semver 风格：本地比远端新（如 rc.7 vs rc.6）时不会误报更新。
+### Timeout policy and run log (since v1.12)
 
-### DSH 文档
+Older versions used a blunt 10-minute hard timeout for npm installs. On a slow link a staged install
+was measured downloading 247 tarballs (231 of the 239 `@deepseek-ai` sub-packages of a 222 MB tree)
+in 9 min 25 s and was then killed, reporting just `staging install failed: npm` — **not a hang, not a
+broken network, simply a hard timeout**.
 
-- **同步开关（默认关闭）**：设置页「DSH 文档」卡片顶部有「自动同步官方文档」开关。
-  关闭（默认）时**不自动同步、不加载 `dsh_docs_search` / `dsh_docs_read` 工具**；
-  开启后才自动同步（首次启动约 217 篇：英文 + 中文 .zh.md，之后每 24 小时静默增量），
-  并注册文档工具。开关状态保存在 `$DSH_HOME/plugin-data/dsh-updater-npm/config.json`。
-- 点击「同步官方文档」手动同步（需先开启开关），显示**进度条**（已下载/总数 + 当前文件名）与阶段（获取清单 → 下载 → 重建索引）。
-- 文档区支持搜索与阅读；对话中也可直接用模型工具：
-  - `dsh_docs_search` —— 搜索本地官方文档索引（中文查询自动优先中文文档）
-  - `dsh_docs_read` —— 读取一篇文档（支持按章节聚焦，80KB 截断，防路径穿越）
+The watchdog is now two-threshold, and configurable through
+`$DSH_HOME/plugin-data/dsh-updater-npm/config.json`:
 
-文档存储于 `$DSH_HOME/docs-sync/`，索引为 `$DSH_HOME/docs-sync/.index.json`。
+```json
+{
+  "docsEnabled": false,
+  "npmIdleMinutes": 10,
+  "npmTimeoutMinutes": 60
+}
+```
 
-## 运行模式
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `npmIdleMinutes` | `10` | minutes of **zero activity** before it is declared stuck and terminated (slow but moving ⇒ never killed) |
+| `npmTimeoutMinutes` | `60` | absolute wall-clock ceiling, to stop a truly unbounded hang |
 
-> **Windows + 缺 PowerShell 7**：DSH 的 shell 工具依赖 `pwsh`（PowerShell 7）。
-> 若检测到 Windows 上未安装 pwsh，「DSH 更新」卡片会显示提示和**「一键安装 PowerShell 7」**按钮
-> （优先 `winget install Microsoft.PowerShell`，不可用时自动改走官方 win-x64 MSI 静默安装，
-> 带实时进度；完成后重启 DSH 生效）。
+**What counts as activity (corrected in v1.12.1):** watching the child's stdout alone is not enough —
+npm prints almost nothing when it is not attached to a TTY (one measured 5-minute install produced
+**not a single stdout line** while npm's own debug log recorded 525 requests, and the watchdog killed
+it). Three signals are now combined, and the maximum wins:
 
-插件会自动识别当前 dsh 的**运行模式**并诚实处理：
+1. `--loglevel=http` — npm logs every request/stage to stdout (measured: 1111 lines instead of 0);
+2. `--logs-dir` — npm's full debug log is written to `plugin-data/dsh-updater-npm/npm-logs/`;
+3. **filesystem activity** — npm's debug log may only be flushed at exit on Windows (in a measured
+   14-second install it sat at 0 bytes for 12 of them), so the staging directory and its
+   `node_modules/` are watched as well: extraction keeps writing files there.
 
-| 模式 | 识别依据 | 更新方式 | 说明 |
+Only when **all three** are idle is the install treated as stuck; during a silent phase a
+`[heartbeat] …` line is appended every minute (into `last-run.log`).
+
+- On a watchdog kill the log carries `[watchdog] …` and `[exit] …` lines, and the error states
+  whether it was an **idle timeout** or the **total limit**, with the elapsed time — no more opaque `: npm`.
+- The same policy covers staged installs, non-Windows in-place `npm install -g`, and source-tree
+  `pnpm/npm install`; `msiexec /qn` is silent by nature and gets a 10-minute idle window.
+- `/dsh-updater-npm/progress` returns progress only (no log payload).
+
+### Plugin self-version and self-update gate
+
+- The card shows **this plugin's own version** and compares it with the latest `dsh-updater-npm` on
+  npm (`GET https://registry.npmjs.org/dsh-updater-npm/latest`, cached for 10 minutes).
+- If the plugin itself is outdated, the card says so and shows a copyable command
+  (`dsh plugin --profile <your profile> add dsh-updater-npm@<latest>`). The "Update via npm" button is
+  disabled, and `/update` is refused server-side with the same message.
+- Reason: updating DSH is performed by the **currently running plugin code**, and an outdated
+  plugin's upgrade path may itself be unsafe (1.9.0, for example, staged without `-g` on Windows and
+  lost every dependency after the swap).
+- **Offline pass-through:** nothing is blocked unless a newer plugin version is positively known, so
+  air-gapped or offline setups are not locked out.
+- Source-tree mode (`git pull`) is not gated, only hinted.
+
+### DSH Docs
+
+- **Sync switch (off by default):** the "DSH Docs" card has an "Auto-sync official docs" toggle.
+  While it is off, nothing is synced and the `dsh_docs_search` / `dsh_docs_read` tools are **not**
+  loaded. When on, the plugin syncs on first start (~217 files: English + Chinese `.zh.md`) and then
+  every 24 hours, and registers the tools. The switch state lives in
+  `$DSH_HOME/plugin-data/dsh-updater-npm/config.json`.
+- "Sync official docs" triggers a manual sync (the switch must be on) with a progress bar
+  (downloaded / total plus the current file) and phases (list → download → rebuild index).
+- Search and read from the docs section, or straight from a conversation with the model tools:
+  - `dsh_docs_search` — search the local official docs index (Chinese queries prefer Chinese docs)
+  - `dsh_docs_read` — read one document (section focus, 80 KB truncation, path-traversal guarded)
+
+Docs live in `$DSH_HOME/docs-sync/`, the index in `$DSH_HOME/docs-sync/.index.json`.
+
+## Run modes
+
+> **Windows without PowerShell 7:** DSH's shell tools need `pwsh`. When pwsh is missing the card
+> shows a hint and an **"Install PowerShell 7"** button (tries `winget install Microsoft.PowerShell`,
+> falls back to the official win-x64 MSI with live progress; restart DSH to apply).
+
+The plugin detects the **run mode** and behaves honestly:
+
+| Mode | Detected by | How it updates | Notes |
 | --- | --- | --- | --- |
-| npm-global | `argv[1]` 为 `<install>/lib/bin.js` | **Windows：staged 更新**（新版本装入独立暂存目录 → 点击「重启 DSH」时无锁原子替换并重启，失败自动回滚旧版）；非 Windows：原地 `npm install -g`，完成后点「重启 DSH」 | 正常部署场景；**Windows 上更新目标即运行实例自身（含 native 依赖），原地 npm install 会撞 EBUSY 导致半拆半装**——staged 流程全程不触碰运行中的部署目录，替换时旧目录先改名备份（`.old-*`），新包校验失败自动恢复当前版本；重启脚本会先校验暂存新包（不通过则放弃整个操作、进程不退出）；每次启动检测部署目录完整性，损坏时提示「修复部署」一键重装当前版本（同样手动重启） |
-| source（源码树） | `argv[1]` 含 `bin.ts` / `tsx` / `apps/` | **源码树更新**：`git fetch` → `git pull --ff-only` → 安装依赖（pnpm/npm） | 源码树运行（如 `pnpm dsh web`）时 npm -g 不影响运行实例；设置页显示分支/本地与远端提交/落后数，一键更新；工作区有未提交修改或未安装 git 时会明确提示并禁用按钮 |
+| npm-global | `argv[1]` is `<install>/lib/bin.js` | **Windows: staged update** (new version into a separate staging dir → "Restart DSH" atomically swaps it in, rolls back on failure). Non-Windows: in-place `npm install -g`, then "Restart DSH" | The Windows update target is the running instance itself (native deps included), where an in-place install hits EBUSY and leaves a half-installed tree. The staged flow never touches the live deployment; the old directory is renamed to `dsh.old-*` as a rollback point; the restart script validates the staged package before doing anything; a broken deployment is reported and can be repaired with one click |
+| source (source tree) | `argv[1]` contains `bin.ts` / `tsx` / `apps/` | **Source-tree update:** `git fetch` → `git pull --ff-only` → dependency install (pnpm/npm) | Running from a source tree (`pnpm dsh web`) means `npm -g` does not affect the running instance. The card shows branch / local and remote commit / commits behind, with a one-click update; uncommitted changes or a missing git disable the button with a clear message |
 
-> **多副本保护**：环境里可能有多个 dsh 副本（多个 Node 安装的全局目录、DSH profiles 等）。
-> 插件只更新**当前运行的这个**：优先用当前实例所属 Node 安装自带的 npm 执行（避免 PATH
-> 上的 npm 属于别的 Node 而把更新写到别处）；`/check` 会列出检测到的其他副本并显示警告；
-> 若 npm 执行成功但当前副本版本没变（更新落空），会明确报错而不是假成功。
-> 副本检测按 **realpath 去重**：指向运行实例的 junction/符号链接（如
-> `$DSH_HOME/profiles/node_modules` 里的依赖镜像）不会误报为独立副本。
+> **Multi-copy protection:** an environment may contain several dsh copies (global dirs of several
+> Node installations, DSH profiles, …). The plugin only ever updates **the currently running one**,
+> preferring the npm that belongs to the running instance's own Node install; `/check` lists the other
+> copies it detected, and an npm run that succeeds while the running copy's version does not change is
+> reported as a failure instead of a false success. Copies are de-duplicated by **realpath**, so
+> junctions/symlinks pointing at the running instance (e.g. dependency mirrors under
+> `$DSH_HOME/profiles/node_modules`) are not mistaken for separate copies.
 
-> 版本回退排查：若"更新后显示一致、重启后回到旧版"，说明运行的是源码树而 npm 更新只改了全局安装。切换为 npm-global 启动（如桌面快捷方式指向 `D:\tools\node22\dsh.cmd web`）后更新即生效。
+> Version-drift troubleshooting: if an update reports success but a restart brings back the old
+> version, you are running from a source tree while npm updated the global install only. Start dsh in
+> npm-global mode (e.g. a shortcut pointing at `D:\tools\node22\dsh.cmd web`) and the update applies.
 
-## 路由
+## Upgrade safety net
 
-- `GET  /dsh-updater-npm/check` —— 更新检查（10 分钟缓存）
-- `POST /dsh-updater-npm/update` —— 执行 npm 更新（同源保护）
-- `POST /dsh-updater-npm/restart` —— 重启当前 DSH 实例（同源保护；若有待交换暂存包则先原子替换部署再重启，支持 Windows/macOS/Linux）
-- `GET  /dsh-updater-npm/progress` —— 更新/同步实时进度（轮询）
-- `GET  /dsh-updater-npm/docs/status` —— 文档同步状态
-- `POST /dsh-updater-npm/docs/sync` —— 触发文档同步（同源保护）
-- `GET  /dsh-updater-npm/docs/search?q=&lang=&limit=` —— 本地索引搜索
-- `GET  /dsh-updater-npm/docs/read?path=&section=` —— 读取文档
+> Each item below was added after a real 0.1.2-rc.1 → 0.1.5-rc.1 cross-version upgrade went wrong,
+> and has been effective since v1.10.0.
+
+1. **Staged installs must pass `-g` (layout consistency).** `npm install --prefix <staging>` without
+   `-g` produces a **hoisted** tree, while an npm-global deployment is **nested**
+   (`@deepseek-ai/dsh/node_modules/…`, self-contained). The swap only moves the package directory, so
+   a hoisted staging tree means **losing every dependency of the new deployment**. The command now
+   always passes `-g`, and before writing the pending-swap marker the plugin verifies that a nested
+   live tree has a nested staging tree and that the staged `lib/bin.js` actually runs under the
+   instance's own node — any failure aborts without touching the deployment.
+2. **Validation precedes the kill.** The restart script validates the staged package (existence +
+   layout) **before** stopping the current process; on failure it `exit 1`s, leaving the old process
+   running rather than half-killed.
+3. **The old deployment is kept as a rollback point.** After a swap the previous directory is renamed
+   to `dsh.old-<timestamp>` (never deleted immediately) and the result is recorded. Once the new
+   version looks stable, the card's **"Remove rollback point"** button frees the space.
+4. **Rename retries.** A just-terminated process may briefly hold directory handles, so the rename is
+   retried up to 5 times, 3 seconds apart.
+5. **Automatic pre-upgrade backup.** When a version will actually change, `settings.yaml`,
+   `.credentials.yaml`, `.agent-presets/` and every profile's `package.json` / `cordis*.yml` /
+   `pnpm-lock.yaml` are snapshotted to `$DSH_HOME/upgrade-backups/dsh-<from>-to-<to>-<timestamp>/`;
+   session logs (up to 256 MB) are copied too, because sessions migrate to a format that **cannot be
+   read back** by older versions. The newest 5 snapshots are kept.
+6. **No activation URL is required after a restart.** Since DSH 0.1.5 the web auth cookie is signed
+   for one activation, so a restart invalidates it — but the browser re-authenticates on its own.
+   (Up to v1.12.2 the restart script scraped the new `?token=` URL, wrote
+   `activation-url.txt` and opened a browser window; that whole path was removed in v1.12.3 as it was
+   not needed.)
+7. **Leftover detection and one-click cleanup.** `/check` reports unreferenced `staging-*` / `repair-*`
+   directories (one unfinished update left **222 MB** behind) and npm's interrupted-install
+   `.<name>-<hash>` leftovers (65 MB in a real case); the card offers "Clean leftovers", and staging
+   directories older than 6 hours are reclaimed automatically at startup.
+8. **Cross-version breaking-change notice.** Jumping across a known breaking range (currently `0.1.5`:
+   V3 session format, persona `text` → `prefix`/`suffix`, plugin API and slot changes) shows a notice
+   with a release-notes link.
+9. **The restart launcher really launches (v1.12.2).** `spawn('powershell.exe', …, { detached: true })`
+   on Windows equals `DETACHED_PROCESS`: the script does not run a single line while spawn still
+   reports `exit=0` — a silent false success that left the swap undone. The launcher now starts a
+   detached **node bootstrap** which runs the platform script as an ordinary child and writes
+   `node bootstrap started <token>` into `restart.log`; the plugin only hands over the staged package
+   after that token shows up (≤ 5 s), and otherwise keeps `pending-swap.json` and the staged tree and
+   reports a clear error.
+
+## Routes
+
+- `GET  /dsh-updater-npm/check` — update check (10-minute cache; includes the cross-version notice, last restart result, pending swap, leftovers and rollback points)
+- `POST /dsh-updater-npm/update` — run the npm update (same-origin only; backs up first, then stages)
+- `POST /dsh-updater-npm/restart` — restart this DSH instance (same-origin only; atomically swaps a pending staged package into place, Windows/macOS/Linux)
+- `POST /dsh-updater-npm/cleanup` — remove leftover staging dirs and npm install leftovers (same-origin only)
+- `POST /dsh-updater-npm/cleanup-rollback` — remove rollback points whose version differs from the running one (same-origin only)
+- `GET  /dsh-updater-npm/progress` — live update/sync progress (polled)
+- `GET  /dsh-updater-npm/docs/status` — docs sync status
+- `POST /dsh-updater-npm/docs/sync` — trigger a docs sync (same-origin only)
+- `GET  /dsh-updater-npm/docs/search?q=&lang=&limit=` — search the local docs index
+- `GET  /dsh-updater-npm/docs/read?path=&section=` — read one document
+
+## Changelog
+
+### v1.13.3
+
+- **Docs only — no code changes.**
+- Added a screenshot of both Settings cards to the README, taken from the running v1.13.2 build: it shows
+  the current card layout (no run-log panel, no activation-URL line) and the plugin's own version row.
+  The stale screenshot (which still showed the removed run-log panel) was dropped in v1.13.1; its
+  replacement is `docs/dsh-update-card-1.13.png`. The version in the file name is deliberate — GitHub's
+  raw CDN keeps serving the old bytes for a while when a file is overwritten.
+
+### v1.13.2
+
+- **Docs only — no code changes.**
+- Fixed the npm page showing the **Chinese** README. npm picks the package readme with
+  `glob('{README,README.*}')` and takes the first *markdown-ish* hit; `README.zh.md` matches that
+  pattern **and** sorts before `README.md` (the check regex is unanchored, so a trailing `.zh.md`
+  counts as markdown), so the Chinese file won. The Chinese README is therefore named
+  **`README_zh.md`** (underscore), which the glob cannot match — npm now publishes the English
+  `README.md`. A note in both files records why the underscore must stay.
+
+### v1.13.1
+
+- **Docs only — no code changes, runtime behaviour is identical to v1.13.0.**
+- The README is now bilingual with **English as the default** (`README.md`) plus a Chinese
+  translation (`README_zh.md`), cross-linked at the top; the Chinese file is shipped in the npm package.
+- Several sections had drifted from the code and were corrected: the stale card screenshot (it still
+  showed the run-log panel that was removed in v1.12.3) was dropped; the timeout section no longer
+  mentions a log panel or `/progress?since=`; the safety net no longer describes activation-URL
+  scraping (the browser re-authenticates by itself); the route list gained `cleanup-rollback`; the
+  rollback point is now described as the card's button; and the restart-launcher fix (node bootstrap)
+  became safety-net item 9.
+
+### v1.13.0
+
+- **Added:** after a successful swap (new version running) the card shows the rollback point's disk
+  usage and a **"Remove rollback point"** button (`POST /dsh-updater-npm/cleanup-rollback`). The safety
+  rule is enforced on the host: only `<leaf>.old-<timestamp>` directories whose version differs from
+  the running version are listed and removed, so the live deployment is never affected (hard assertions
+  in the smoke tests).
+- **Polished:** the card's explanatory prose is gone — `updNote` / `docsNote` / `pluginOutdatedBody`
+  were removed entirely and the remaining strings were compressed to a single line (`srcDirty`,
+  `pwshMissingHint`, `deployBrokenWarn`, `npmMismatch`, `stagingWasteFound`, `repairRunning`,
+  `docs*Hint`, …), leaving state and actions only.
+- Tests: 58 (new: rollback scanning, only non-current versions removed, live deployment untouched,
+  same-origin guard on the cleanup route).
+
+### v1.12.3
+
+Subtracting, on user feedback:
+
+- **Removed:** the restart script's whole "scrape the new activation URL + open the browser" logic
+  (both the Windows and the POSIX branch), plus the up-to-2-minute polling tail it needed.
+- **Removed:** the **scrolling run-log panel** — the full npm output now goes to
+  `plugin-data/dsh-updater-npm/last-run.log` when an operation ends (`[watchdog]` / `[exit]` lines
+  included) and the card keeps only the progress bar and the last few lines. `/progress` no longer
+  carries `log` / `limits`.
+- Kept: `--loglevel=http` (it is the watchdog's real heartbeat, not decoration), the three-signal
+  activity probe, and the idle/hard timeout pair.
+- Tests: the script assertions now check that no token is scraped and no browser is opened, plus a
+  `last-run.log` assertion (56 total).
+
+### v1.12.2
+
+Fixes the broken chain "the built-in restart does nothing, and after an external restart you are still
+on the old version": the staged install had actually **succeeded** (`verbose exit 0` / `info ok`), but
+the restart step failed silently, so the swap never happened.
+
+- **Root cause (reproduced):** `launchRestartScript` used
+  `spawn('powershell.exe', […], { detached: true })`. On Windows that is `DETACHED_PROCESS`: the console
+  program exits immediately with `exit=0` **without executing a single line** of the script, while spawn
+  reports no error. A/B test: the same script run through a detached **node bootstrap** executes fine.
+- **Fix (critical):** launch a detached `node` bootstrap that runs the platform script as an ordinary
+  child; the bootstrap writes `node bootstrap started <token>` into `restart.log`.
+- **Fix (critical):** `restartNow` now **waits for that token** (up to 5 s) before handing over the
+  staged package. If it never appears, it returns a clear error and **keeps `pending-swap.json` and the
+  staging directory** — the old code deleted the marker here, so the 222 MB staged tree was later swept
+  as "leftover garbage" and the user could neither upgrade nor recover it.
+- **Added:** `/check` returns `pendingSwap`, and the card shows "staged, waiting to be swapped" while
+  keeping the "Restart DSH" button, so an external restart can still be completed with one click; a
+  marker whose staging directory is gone is cleaned up automatically.
+- Tests: 3 new (54 total) — the launcher is **really executed**, `waitForBootstrap` does not report
+  false positives, and launcher + swap script perform a real directory swap on a fake deployment. The
+  old code necessarily fails these, which is exactly why it slipped past the previous 36 tests.
+
+### Earlier releases
+
+- **v1.12.1** — fixed the false kill introduced by 1.12.0: npm is silent on stdout without a TTY, so
+  the stdout-only idle watchdog killed a working install at exactly 5m00s. Added `--loglevel=http
+  --progress=false`, `--logs-dir` and a three-signal activity probe; default `npmIdleMinutes` 5 → 10.
+  Measured end-to-end: 520 packages in 1m, 222.6 MB / 25474 files, exit code 0 (the cold-cache run of
+  the same command never finished in 9m25s).
+- **v1.12.0** — the blunt 10-minute hard timeout became idle timeout + wall-clock ceiling, configurable
+  via `npmIdleMinutes` / `npmTimeoutMinutes`; the watchdog and the run log were introduced (log panel
+  removed again in 1.12.3); the source-tree dependency install reuses the same watchdog.
+- **v1.11.0** — the card shows the plugin's own version and gates "Update via npm" while the plugin
+  itself is outdated (`/update` refuses too; offline pass-through).
+- **v1.10.0** — the upgrade safety net above, after the real 0.1.2-rc.1 → 0.1.5-rc.1 upgrade:
+  `-g` + layout/executability validation, validate-before-kill, rollback point, rename retries,
+  pre-upgrade backups, output redirection, leftover cleanup, breaking-change notices.
+
+Full Chinese changelog with every measurement: [README_zh.md](README_zh.md#更新日志).
 
 ## License
 
 [MIT](LICENSE)
-
----
-
-## English
-
-**dsh-updater-npm** is a DSH updater + official docs sync plugin for
-[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness):
-
-- **DSH Update (npm)**: check the latest `@deepseek-ai/dsh` on npm, one-click
-  `npm install -g @deepseek-ai/dsh@latest`, with **live progress** (npm output stream);
-  after the update a **"Restart DSH"** button appears — it exits the current process
-  and relaunches with the original command line (PowerShell on Windows, `/bin/sh` on
-  macOS/Linux; also shown after source-tree updates and deployment repair).
-- **DSH Docs (official)**: incrementally sync `deepseek-ai/deepseek-harness` `docs/`
-  to `$DSH_HOME/docs-sync/` (skips unchanged files by GitHub blob sha) with a **progress bar**,
-  plus `dsh_docs_search` / `dsh_docs_read` model tools for in-conversation doc lookup.
-
-The plugin detects the **run mode**: `npm-global` (normal; npm update applies directly)
-or `source` (source-tree, e.g. `pnpm dsh web`; npm update is refused with a warning
-because it does not affect the running instance — use `git pull` instead).
-
-**i18n:** UI and host messages support **Chinese / English**, following the system
-language automatically (or the manual choice in Settings → General → Language);
-the `dsh_docs_search` / `dsh_docs_read` tool descriptions and outputs follow the
-system language too.
-
-**Install:**
-
-```bash
-dsh plugin --profile web add dsh-updater-npm
-# or
-dsh plugin --profile web add github:SiriusWJ/dsh-updater-npm
-```
