@@ -188,6 +188,49 @@ dsh plugin --profile web add github:SiriusWJ/dsh-updater-npm
 
 ## 更新日志
 
+### v1.13.4
+
+针对「换一台 DSH 环境还能不能用」做了一轮审计，查出七处缺陷，全部修复；每一处都在真实部署上
+复现并验证过。
+
+- **设置页导航的小红点永远不刷新。** `locale.register(ns, dicts)` 这个两参形式，会把第二个参数的
+  **键**当作 locale id、按 `dsh-client-locale` 的 `LOCALE_ID_PATTERN`
+  （`/^[A-Za-z]{2,8}(-[A-Za-z0-9]{1,8})*$/u`）校验。插件传的是合成的 `"~nav…"` 键，过不了校验，
+  于是 `register()` 在 `publish()` 提升 revision **之前**就抛错，而外层的 `catch` 把异常吞了。
+  壳程序只在 slot 版本号或 locale revision 变化时才重算导航行，所以红点既不出现也不消失。
+  现改用三参形式 + 唯一命名空间。
+- **`locateInstall()` 的兜底是死代码。** 它按「preset 路径以
+  `/agent-presets/<id>/agent.cordis.yml` 结尾」反推安装目录，但该布局早已不存在：随包发布的 preset
+  在 `<dsh>/node_modules/@deepseek-ai/dsh-agent-presets/presets/<id>/`，用户自建的在
+  `<DSH_HOME>/.agent-presets/<id>/`。两者都不含 `/agent-presets/`，后缀判定恒为 false —— 只要
+  `argv[1]` 不是 `bin.js`，更新 / 修复 / 重启 / 文档工具就彻底没有兜底路径。现改为解析
+  `@deepseek-ai/dsh/package.json` 再 realpath。锚点必须是 **profile 目录**而不是
+  `import.meta.url`：`link:` 或 junction 安装时 Node 会把模块 URL 改写成包的真实路径，
+  那里根本没有 `node_modules`。
+- **`buildRestartScript()` 收 `platform` 参数，却用宿主的 `path.join` 拼路径。** 生产上只传
+  `process.platform`，所以一直看不出来；但在 Windows 上生成 POSIX 脚本时整条路径会被翻成反斜杠
+  （连开头的 `/` 都变成 `\`），脚本随即判 `staging incomplete` 并整个跳过交换。现按参数选用
+  `posix.join` / `win32.join`。
+- **暂存包校验的 60 秒上限没生效。** `verifyStagedBinary()` 把数字 `60000` 当 `runInstallCmd` 的
+  第三个参数传，而该参数早已改成 `limits` 对象；`(60000).idleMs` 是 `undefined`，于是静默回落到
+  5 分钟 / 60 分钟默认值 —— 暂存包半坏时这一步能挂满一小时。
+- **升级备份把凭据副本摊在默认可读权限下。** 快照会复制 `.credentials.yaml` 与整个 `sessions/`，
+  而备份目录用默认 umask 创建（POSIX 上通常 `0755`），同机其他账号可以直接读走凭据副本。
+  现将备份根与新目录都收紧到 `0700`。
+- **registry 被硬编码成 `registry.npmjs.org`。** 配了镜像站或企业内网 registry 的用户，插件去
+  npmjs 查版本、`npm` 自己却从镜像装包：轻则慢，重则在墙内直接报「registry unreachable」，
+  而实际上更新本来能成功。现按 `env → ./.npmrc → ~/.npmrc → 默认` 解析，取到的值不是
+  `http(s)` URL 就继续往下走。
+- **`resolveProfileName()` 在共享安装布局下判断错误。** 插件只落在共享的
+  `profiles/node_modules`（hoisted 或部分 pnpm 布局）时，逐 profile 探测全部为假，函数会把
+  `argv` 里已确定的 profile 丢掉、退回硬编码的 `'web'`，于是打印出来的自更新命令可能指向错误的
+  profile。现补上共享位置的判定。
+
+验证：本地冒烟测试新增了平台路径拼接、registry 解析、locale bump 契约、`locateInstall` 兜底四组
+断言。`test/smoke.mjs` 仍是 57 passed / 1 failed —— 与未改动的上游提交上同一条既有 EPERM 失败
+一致。POSIX 的重启 + 交换流程用 Git Bash `sh` 真机跑通（交换、回滚点、暂存清理、拉起新部署），
+上面那个 `path.join` 缺陷正是这一步暴露出来的。
+
 ### v1.13.3
 
 - **仅文档改动，无代码变更。**

@@ -213,6 +213,56 @@ The plugin detects the **run mode** and behaves honestly:
 
 ## Changelog
 
+### v1.13.4
+
+An audit of how the plugin behaves on DSH deployments other than the one it was developed on
+turned up seven defects. All seven are fixed, and each was reproduced and verified against a
+real deployment.
+
+- **The Settings nav red dot never refreshed.** The two-argument form `locale.register(ns, dicts)`
+  treats each **key** of the second argument as a locale id and validates it against
+  `dsh-client-locale`'s `LOCALE_ID_PATTERN` (`/^[A-Za-z]{2,8}(-[A-Za-z0-9]{1,8})*$/u`). The plugin
+  passed a synthetic `"~nav…"` key, which fails that check, so `register()` threw **before**
+  `publish()` bumped the revision — and the surrounding `catch` swallowed the error. The shell
+  recomputes the nav rows only when the slot version or the locale revision changes, so the red dot
+  never appeared or disappeared. It now uses the three-argument form with a unique namespace.
+- **`locateInstall()`'s fallback was dead code.** It derived the install directory from an agent
+  preset path ending in `/agent-presets/<id>/agent.cordis.yml`. That layout no longer exists:
+  shipped presets live at `<dsh>/node_modules/@deepseek-ai/dsh-agent-presets/presets/<id>/` and
+  user presets at `<DSH_HOME>/.agent-presets/<id>/`. Neither contains `/agent-presets/`, so the
+  suffix test was always false and update / repair / restart / the docs tools had no recovery path
+  whenever `argv[1]` is not `bin.js`. It now resolves `@deepseek-ai/dsh/package.json` and realpaths
+  it. The anchor is the **profile** directory, not `import.meta.url`: with a `link:` or junction
+  install Node rewrites the module URL to the package's real path, where no `node_modules` exists.
+- **`buildRestartScript()` took a `platform` argument but joined paths with the host's
+  `path.join`.** Production only ever passed `process.platform`, which hid the mismatch — but a
+  POSIX script generated on Windows came out fully backslashed (a leading `/` became `\`), and the
+  script then aborted with `staging incomplete` and skipped the swap entirely. It now selects
+  `posix.join` / `win32.join` from the argument.
+- **The 60-second cap on staged-package verification had no effect.** `verifyStagedBinary()` passed
+  the number `60000` as `runInstallCmd`'s third argument, but that parameter has since become a
+  `limits` object; `(60000).idleMs` is `undefined`, so the call silently fell back to the
+  5-minute / 60-minute defaults and a half-broken staged package could stall this step for an hour.
+- **Upgrade backups left credential copies readable.** The snapshot copies `.credentials.yaml` and
+  the whole `sessions/` tree. The backup directory was created with the default umask (commonly
+  `0755` on POSIX), so other local accounts could read the credential copy. The backup root and the
+  new backup directory are now `0700`.
+- **The registry was hard-coded to `registry.npmjs.org`.** With a mirror or an internal registry,
+  the plugin queried npmjs while `npm` itself installed from the mirror — slow at best, and behind
+  a firewall it reported "registry unreachable" for an update that would have worked. It now
+  resolves `env → ./.npmrc → ~/.npmrc → default`, skipping any value that is not an `http(s)` URL.
+- **`resolveProfileName()` mis-detected shared installs.** When the plugin lives only in the shared
+  `profiles/node_modules` (hoisted, or some pnpm layouts), every per-profile probe returns false
+  and the function discarded an `argv`-derived profile in favour of the hard-coded `'web'`, so the
+  printed self-update command could name the wrong profile. It now checks the shared location too.
+
+Verification: the local smoke suite gained assertions for platform path joining, registry parsing,
+the locale-bump contract and the `locateInstall` fallback. `test/smoke.mjs` still reports
+57 passed / 1 failed — the same pre-existing EPERM failure it shows on the untouched upstream
+commit. The POSIX restart + swap flow was executed for real under Git Bash `sh` (swap, rollback
+point, staging cleanup, relaunch of the new deployment), which is also what exposed the
+`path.join` defect above.
+
 ### v1.13.3
 
 - **Docs only — no code changes.**
