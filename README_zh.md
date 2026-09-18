@@ -2,6 +2,10 @@
 
 [English](README.md) | **中文**
 
+<!-- 文件名故意是下划线 README_zh.md，不要改回 README.zh.md：
+     npm 用 glob('{README,README.*}') 挑包 readme，README.zh.md 会命中且排在 README.md 之前，
+     导致 npm 页面显示中文；下划线命名不匹配该模式，npm 才会取英文的 README.md。 -->
+
 DSH 更新器 + 官方文档同步器，用于 [DeepSeek Harness (dsh)](https://github.com/deepseek-ai/deepseek-harness)。
 
 设置页提供两个卡片：
@@ -182,11 +186,20 @@ dsh plugin --profile web add github:SiriusWJ/dsh-updater-npm
 
 ## 更新日志
 
+### v1.13.2
+
+- **仅文档改动，无代码变更。**
+- 修掉 npm 页面显示**中文** README 的问题：npm 用 `glob('{README,README.*}')` 挑包 readme，
+  取第一个「像 markdown」的命中项，而 `README.zh.md` 既匹配该模式、又排在 `README.md` 之前
+  （判定正则是**非锚定**的，结尾的 `.zh.md` 也算 markdown），于是中文那份被选中。
+  因此中文文件改名为 **`README_zh.md`**（下划线），不再匹配该模式，npm 现在取英文的 `README.md`。
+  两个 README 里都留了注释说明下划线不能改回点号。
+
 ### v1.13.1
 
 - **仅文档改动，无代码变更，运行时行为与 v1.13.0 完全一致。**
-- README 改为**英文默认**（`README.md`）+ 中文（`README.zh.md`）双语，顶部互相链接；
-  `README.zh.md` 已加入 npm 包白名单。
+- README 改为**英文默认**（`README.md`）+ 中文（`README_zh.md`）双语，顶部互相链接；
+  中文那份已加入 npm 包白名单。
 - 同时修复与代码脱节的段落：删除过时的卡片截图（图中还是 v1.12.3 已移除的运行日志面板）、
   超时段不再提日志面板与 `/progress?since=`、安全网不再描述抓取激活地址
   （浏览器自行重新鉴权）、路由表补上 `cleanup-rollback`、回滚点改为卡片按钮说明，

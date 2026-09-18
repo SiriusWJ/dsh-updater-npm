@@ -1,6 +1,11 @@
 # dsh-updater-npm
 
-**English** | [中文](README.zh.md)
+**English** | [中文](README_zh.md)
+
+<!-- 文件名故意是 README_zh.md（下划线），不要改回 README.zh.md：
+     npm 用 glob('{README,README.*}') 挑包 readme，README.zh.md 会命中并排在 README.md 之前
+     （它的 markdown 正则是非锚定的，".zh.md" 也算 markdown），结果 npm 页面会显示中文。
+     下划线命名不匹配该模式，npm 才会取 README.md（英文）。 -->
 
 DSH updater + official docs sync plugin for [DeepSeek Harness (dsh)](https://github.com/deepseek-ai/deepseek-harness).
 
@@ -206,11 +211,21 @@ The plugin detects the **run mode** and behaves honestly:
 
 ## Changelog
 
+### v1.13.2
+
+- **Docs only — no code changes.**
+- Fixed the npm page showing the **Chinese** README. npm picks the package readme with
+  `glob('{README,README.*}')` and takes the first *markdown-ish* hit; `README.zh.md` matches that
+  pattern **and** sorts before `README.md` (the check regex is unanchored, so a trailing `.zh.md`
+  counts as markdown), so the Chinese file won. The Chinese README is therefore named
+  **`README_zh.md`** (underscore), which the glob cannot match — npm now publishes the English
+  `README.md`. A note in both files records why the underscore must stay.
+
 ### v1.13.1
 
 - **Docs only — no code changes, runtime behaviour is identical to v1.13.0.**
 - The README is now bilingual with **English as the default** (`README.md`) plus a Chinese
-  translation (`README.zh.md`), cross-linked at the top; `README.zh.md` is shipped in the npm package.
+  translation (`README_zh.md`), cross-linked at the top; the Chinese file is shipped in the npm package.
 - Several sections had drifted from the code and were corrected: the stale card screenshot (it still
   showed the run-log panel that was removed in v1.12.3) was dropped; the timeout section no longer
   mentions a log panel or `/progress?since=`; the safety net no longer describes activation-URL
@@ -286,7 +301,7 @@ the restart step failed silently, so the swap never happened.
   `-g` + layout/executability validation, validate-before-kill, rollback point, rename retries,
   pre-upgrade backups, output redirection, leftover cleanup, breaking-change notices.
 
-Full Chinese changelog with every measurement: [README.zh.md](README.zh.md#更新日志).
+Full Chinese changelog with every measurement: [README_zh.md](README_zh.md#更新日志).
 
 ## License
 
