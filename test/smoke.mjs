@@ -351,9 +351,9 @@ check('/check 载荷包含插件版本与全部安全网字段', async () => {
 // ── 9. 超时策略与运行日志（1.12：10 分钟硬超时 → 空闲超时 + 硬上限）─────────
 section('9) 超时策略（空闲看门狗）与运行日志')
 const cfgFile = join(sandboxHome, 'plugin-data', 'dsh-updater-npm', 'config.json')
-check('默认配置：空闲 5 分钟判卡死、总上限 60 分钟', () => {
+check('默认配置：空闲 10 分钟判卡死、总上限 60 分钟', () => {
   const cfg = t.readPluginConfig()
-  assert.equal(cfg.npmIdleMinutes, 5)
+  assert.equal(cfg.npmIdleMinutes, 10)
   assert.equal(cfg.npmTimeoutMinutes, 60)
 })
 check('配置可覆盖，非法值回退默认（不炸）', () => {
@@ -364,7 +364,7 @@ check('配置可覆盖，非法值回退默认（不炸）', () => {
   assert.equal(cfg.npmTimeoutMinutes, 90)
   writeFileSync(cfgFile, JSON.stringify({ npmIdleMinutes: 0, npmTimeoutMinutes: 'abc' }))
   cfg = t.readPluginConfig()
-  assert.equal(cfg.npmIdleMinutes, 5, '0 应回退默认')
+  assert.equal(cfg.npmIdleMinutes, 10, '0 应回退默认')
   assert.equal(cfg.npmTimeoutMinutes, 60, '非数字应回退默认')
 })
 check('writeDocsConfig 合并写入，不抹掉超时配置', () => {
@@ -393,6 +393,67 @@ check('持续输出但超过总上限 → hard 看门狗终止', async () => {
   const res = await t.runInstallCmd([process.execPath, '-e', script], null, { idleMs: 60000, hardMs: 800 })
   assert.equal(res.ok, false)
   assert.equal(res.timedOut, 'hard')
+})
+// 1.12.1 的真实故障：npm 在非 TTY 下默认全程静默，只有 stdout 的看门狗会把
+// 「正在下载/解包」误判成卡死（实测 5 分钟 0 输出被杀，同期 npm 日志写了 525 行请求）。
+check('静默但日志文件在长 → 不杀（npm 静默下载的真实形态）', async () => {
+  const probeDir = mkdtempSync(join(tmpdir(), 'dsh-probe-'))
+  const probeFile = join(probeDir, 'debug-0.log')
+  writeFileSync(probeFile, 'x')
+  let beats = 0
+  const beat = setInterval(() => { beats += 1; writeFileSync(probeFile, 'line-' + beats) }, 100)
+  try {
+    const res = await t.runInstallCmd([process.execPath, '-e', 'console.log("start"); setTimeout(()=>{}, 2500)'], null, {
+      idleMs: 1200,
+      hardMs: 30000,
+      activityProbe: () => t.newestMtimeMs(probeDir),
+    })
+    assert.equal(res.timedOut, null, '静默但活着不能被杀（这正是 1.12.0 的误杀场景）')
+    assert.equal(res.ok, true)
+  } finally {
+    clearInterval(beat)
+    rmSync(probeDir, { recursive: true, force: true })
+  }
+})
+check('静默且日志文件也不动 → 仍按 idle 终止（真卡死不漏）', async () => {
+  const probeDir = mkdtempSync(join(tmpdir(), 'dsh-probe-'))
+  writeFileSync(join(probeDir, 'debug-0.log'), 'x')
+  try {
+    const res = await t.runInstallCmd([process.execPath, '-e', 'setTimeout(()=>{}, 30000)'], null, {
+      idleMs: 900,
+      hardMs: 30000,
+      activityProbe: () => t.newestMtimeMs(probeDir),
+    })
+    assert.equal(res.ok, false)
+    assert.equal(res.timedOut, 'idle')
+  } finally {
+    rmSync(probeDir, { recursive: true, force: true })
+  }
+})
+check('staged 活动探针：暂存目录落盘即算活动（npm 日志可能只在退出时才写）', async () => {
+  const stage = mkdtempSync(join(tmpdir(), 'dsh-probe-stage-'))
+  try {
+    const probe = t.stagedActivityProbe(stage)
+    const before = probe()
+    assert.equal(typeof before, 'number')
+    await new Promise((r) => setTimeout(r, 20))
+    mkdirSync(join(stage, 'node_modules'), { recursive: true })
+    writeFileSync(join(stage, 'node_modules', 'a-package'), 'x')
+    assert.ok(probe() > before, '探针没感知到暂存目录写入（解包阶段会被误判卡死）')
+  } finally {
+    rmSync(stage, { recursive: true, force: true })
+  }
+})
+check('staged 安装 argv：-g + http 级日志 + 独立 logs-dir（非 TTY 静默三件套）', () => {
+  const argv = t.stagedInstallArgv('C:\\stage', '0.1.5-rc.2', null, 'C:\\logs')
+  assert.ok(argv.includes('-g'), '-g 缺失（交换后会丢依赖）')
+  assert.ok(argv.includes('--loglevel=http'), '--loglevel=http 缺失（非 TTY 下 npm 全程静默）')
+  assert.ok(argv.includes('--logs-dir'), '--logs-dir 缺失（探活依赖它）')
+  assert.ok(argv.includes('--progress=false'), '--progress=false 缺失（\\r 刷屏）')
+  assert.ok(argv.includes('@deepseek-ai/dsh@0.1.5-rc.2'))
+  const withOwn = t.stagedInstallArgv('C:\\stage', '0.1.5-rc.2', { nodeExe: 'node-x', npmCli: 'npm-cli.js' }, 'C:\\logs')
+  assert.equal(withOwn[0], 'node-x')
+  assert.equal(withOwn[1], 'npm-cli.js')
 })
 check('运行日志留痕：按行、剥 ANSI、\\r 覆盖行只留最后一段', () => {
   t.opLogReset()

@@ -51,15 +51,28 @@ dsh plugin --profile web add github:SiriusWJ/dsh-updater-npm
 ```json
 {
   "docsEnabled": false,
-  "npmIdleMinutes": 5,
+  "npmIdleMinutes": 10,
   "npmTimeoutMinutes": 60
 }
 ```
 
 | 键 | 默认 | 含义 |
 | --- | --- | --- |
-| `npmIdleMinutes` | `5` | 连续多少分钟**完全无输出**才判定卡死并终止（慢但一直在下载 → 不会被杀） |
+| `npmIdleMinutes` | `10` | 连续多少分钟**毫无活动**才判定卡死并终止（慢但一直在动 → 不会被杀） |
 | `npmTimeoutMinutes` | `60` | 总时长硬上限，兜底防止无限挂起 |
+
+**「有活动」的判定（v1.12.1 修正）**：只看子进程 stdout 是不够的——npm 在非 TTY 下
+默认几乎不输出，实测一次 5 分钟的安装 stdout **一行都没有**，而同期 npm 自己的 debug
+日志写了 525 行请求，结果被自己的看门狗误杀。现在三路取最大值：
+
+1. `--loglevel=http`：让 npm 把每个请求/阶段打到 stdout（实测加完后 stdout 立刻有
+   `npm http fetch GET 200 …` 行，进度面板也终于有内容）；
+2. `--logs-dir`：npm 的完整 debug 日志写进 `plugin-data/dsh-updater-npm/npm-logs/`；
+3. **文件系统信号**：npm 的 debug 日志在 Windows 上**可能整场只在退出时才落盘**
+   （实测 14 秒的安装里它 12 秒都是 0 字节），所以同时盯暂存目录与暂存
+   `node_modules/` 的写入——解包阶段会不停往里落文件，这才是真正的兜底心跳。
+
+只有**三路全都不动**才会判卡死；静默期每分钟往面板写一条 `[heartbeat] …`。
 
 - 超时被杀时，日志里会留 `[watchdog] …` 与 `[exit] …` 两行，错误信息直接说明是
   **空闲超时**还是**总时长超限**，并提示该调哪个键，不再是含义不明的 `: npm`。
@@ -160,6 +173,27 @@ dsh plugin --profile web add github:SiriusWJ/dsh-updater-npm
 - `GET  /dsh-updater-npm/docs/read?path=&section=` —— 读取文档
 
 ## 更新日志
+
+### v1.12.1
+
+修掉 1.12.0 引入的**新误杀**（18:59:45 那次实测：staged 安装跑了整 5 分钟被自己的看门狗
+杀掉，而 npm 其实一直在工作）：
+
+- **根因**：npm 在非 TTY 下默认几乎不往 stdout 输出，1.12.0 的空闲看门狗只看 stdout，
+  于是「正在重新校验 525 个 packument」被当成了「卡死」。
+- **修复**：staged 安装与原地安装的 npm 参数加 `--loglevel=http --progress=false`，
+  让进度面板与看门狗都有真实的 stdout 心跳。
+- **修复**：新增 `--logs-dir` + 活动探针 `activityProbe`——看门狗同时盯 npm 的
+  debug 日志目录、暂存目录与暂存 `node_modules/` 的最新 mtime（实测 npm 的 debug
+  日志在 Windows 上可能整场只在退出时落盘，光看它不够，文件系统信号才是兜底）；
+  **只有三路全都不动**才判卡死；静默期每分钟输出一条 `[heartbeat] …` 让面板保持可信。
+- **调整**：默认 `npmIdleMinutes` 5 → **10**（探针已能识别静默期，留更大余量）。
+- 测试：新增 4 项（共 51 项）——真跑子进程验证「静默但日志文件在长 → 不杀」
+  「静默且日志也不动 → 仍按 idle 终止」，staged argv 必含三件套，以及
+  「暂存目录落盘即算活动」的探针行为。
+- **端到端实测**（本机 rc.1→rc.2，缓存已热）：真实执行修复后的 argv，
+  `added 520 packages in 1m`，暂存树 222.6 MB / 25474 个文件，npm 退出码 0；
+  同样一条命令在第一次（冷缓存 + 慢链路）是 9 分 25 秒都没跑完。
 
 ### v1.12.0
 
