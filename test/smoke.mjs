@@ -317,10 +317,14 @@ check('/check 载荷包含插件版本与全部安全网字段', async () => {
   mkdirSync(join(work, 'lib'), { recursive: true })
   writeFileSync(join(work, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh', version: '0.1.2-rc.1' }))
   writeFileSync(join(work, 'lib', 'bin.js'), '// stub')
-  // 真实约定：随部署自带的 preset 位于 <安装目录>/agent-presets/<id>/agent.cordis.yml
-  const presetPath = join(work, 'agent-presets', 'cordis', 'agent.cordis.yml')
-  mkdirSync(dirname(presetPath), { recursive: true })
-  writeFileSync(presetPath, '')
+  // locateInstall 的主路径来自 process.argv[1]：<install>/lib/bin.js。
+  // 旧 fixture 伪造的是 <install>/agent-presets/<id>/agent.cordis.yml，并把那当作
+  // 「真实约定」—— 但该布局已不存在（随包 preset 现在位于
+  // <install>/node_modules/@deepseek-ai/dsh-agent-presets/presets/<id>/），
+  // 于是那段 preset 反推兜底永远不会命中，fixture 只是让死代码看起来被测到了。
+  // 这里改成驱动真正生效的 argv[1] 路径。
+  const savedArgv1 = process.argv[1]
+  process.argv[1] = join(work, 'lib', 'bin.js')
   const routes = []
   const ctx = {
     get: () => undefined,
@@ -329,7 +333,7 @@ check('/check 载荷包含插件版本与全部安全网字段', async () => {
     inject: (deps, fn) => { fn(ctx) },
     timer: { interval: () => () => {}, timeout: async () => {} },
     webServer: { register: (r) => { routes.push(r); return () => {} } },
-    agentPresets: { list: async () => [{ id: 'cordis', path: presetPath }] },
+    agentPresets: { list: async () => [] },
   }
   mod.apply(ctx)
   const route = routes.find((r) => r.path === '/dsh-updater-npm/check')
@@ -338,6 +342,7 @@ check('/check 载荷包含插件版本与全部安全网字段', async () => {
   const res = { writeHead: (code) => { rec.code = code }, end: (body) => { rec.body = body } }
   route.handler({ method: 'GET', headers: { origin: 'http://127.0.0.1:3080', host: '127.0.0.1:3080' } }, res)
   for (let i = 0; i < 80 && rec.body === undefined; i += 1) await new Promise((r) => setTimeout(r, 250))
+  process.argv[1] = savedArgv1
   assert.ok(rec.body !== undefined, 'check handler did not respond in time')
   const body = JSON.parse(rec.body)
   rmSync(work, { recursive: true, force: true })

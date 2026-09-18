@@ -366,8 +366,18 @@ window.__ModuleLoader__.load({
         if (locale === undefined) return
         bumpSeq += 1
         try {
-          locale.register(NS, { ["~nav" + bumpSalt + "-" + bumpSeq]: {} })
-        } catch (e) { /* 忽略（如 HMR 后字典残留导致的重复注册） */ }
+          // 用三参形式注册一个「一次性空字典」，令 locale revision +1，壳程序随即重算
+          // 导航行并重跑 label thunk，红点随之出现/消失（不重挂载卡片内容）。
+          //
+          // 不能写成 register(NS, { "~nav…": {} })：两参形式的第二个参数是
+          // locale → 字典 的映射，**键会被当作 locale id 校验**
+          // （dsh-client-locale 的 LOCALE_ID_PATTERN = /^[A-Za-z]{2,8}(-[A-Za-z0-9]{1,8})*$/），
+          // "~nav…" 不匹配 → 在 publish() 之前就抛错 → revision 永不 +1，
+          // 而下面的 catch 会把异常吞掉，红点因此永远不刷新。
+          // 这里改成「新命名空间 + 合法 locale id」：命名空间唯一即无重复注册，
+          // 空字典不进快照（快照只有 active/locales/revision），只多一个极小的条目。
+          locale.register(NS + ":navbump:" + bumpSalt + "-" + bumpSeq, "zh", {})
+        } catch (e) { /* 忽略（如 HMR 后残留导致的重复注册） */ }
       }
 
       // ── DSH 更新卡片 ────────────────────────────────────────────────────────
