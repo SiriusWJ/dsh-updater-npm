@@ -206,6 +206,18 @@ The plugin detects the **run mode** and behaves honestly:
 
 ## Changelog
 
+### v1.13.1
+
+- **Docs only — no code changes, runtime behaviour is identical to v1.13.0.**
+- The README is now bilingual with **English as the default** (`README.md`) plus a Chinese
+  translation (`README.zh.md`), cross-linked at the top; `README.zh.md` is shipped in the npm package.
+- Several sections had drifted from the code and were corrected: the stale card screenshot (it still
+  showed the run-log panel that was removed in v1.12.3) was dropped; the timeout section no longer
+  mentions a log panel or `/progress?since=`; the safety net no longer describes activation-URL
+  scraping (the browser re-authenticates by itself); the route list gained `cleanup-rollback`; the
+  rollback point is now described as the card's button; and the restart-launcher fix (node bootstrap)
+  became safety-net item 9.
+
 ### v1.13.0
 
 - **Added:** after a successful swap (new version running) the card shows the rollback point's disk
