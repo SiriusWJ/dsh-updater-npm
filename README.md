@@ -38,6 +38,9 @@ dsh plugin --profile web add github:SiriusWJ/dsh-updater-npm
   `$DSH_HOME/plugin-data/dsh-updater-npm/last-run.log`，需要排查时看文件即可，界面保持清爽。
 - 更新完成后出现**「重启 DSH」按钮**——点击后按原启动命令自动退出并重新拉起（**跨平台**：Windows 用 PowerShell，macOS/Linux 用 `/bin/sh`；源码树更新与部署修复完成后同样提供该按钮）。
   **重启后不需要手动打开新的激活地址**：浏览器会自行重新鉴权，不会弹出新窗口。
+- 交换成功后（即新版已经跑起来）卡片会显示**回滚点占用**与**「清理回滚点」**按钮：交换时旧部署会被改名保留成
+  `<安装目录同级>/dsh.old-<时间戳>` 作为回滚点（实测 222 MB），确认新版稳定后一键释放。
+  安全约束：只列/只删**版本与当前运行版本不同**的回滚点，现役部署永远不动。
 - 版本比较为 semver 风格：本地比远端新（如 rc.7 vs rc.6）时不会误报更新。
 
 ### 超时策略与运行日志（v1.12 起）
@@ -173,6 +176,17 @@ dsh plugin --profile web add github:SiriusWJ/dsh-updater-npm
 - `GET  /dsh-updater-npm/docs/read?path=&section=` —— 读取文档
 
 ## 更新日志
+
+### v1.13.0
+
+- **新增**：交换成功、新版已经跑起来后，卡片显示回滚点占用与**「清理回滚点」**按钮
+  （`POST /dsh-updater-npm/cleanup-rollback`）。安全约束写死在宿主端：
+  只把版本与当前运行版本不同的 `<leaf>.old-<时间戳>` 当回滚点列出并删除，
+  现役部署不会被牵连（冒烟测试对这一点有硬断言）。
+- **优化**：卡片提示去掉解释性长句——整段移除 `updNote` / `docsNote` / `pluginOutdatedBody`，
+  其余文案压缩成一句（`srcDirty`、`pwshMissingHint`、`deployBrokenWarn`、`npmMismatch`、
+  `stagingWasteFound`、`repairRunning`、`docs*Hint` 等），只留状态与操作。
+- 测试：58 项（新增回滚点扫描、只删非当前版本、现役部署不被牵连、清理路由同源保护）。
 
 ### v1.12.3
 

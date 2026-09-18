@@ -5,10 +5,10 @@
  *   1) 暂存包结构必须与现网一致（嵌套 vs 提升），否则交换会丢掉全部依赖；
  *   2) 重启脚本的交换前校验必须发生在「杀进程之前」，不通过就整体放弃；
  *   3) 改名要重试、旧部署要保留成回滚点，而不是交换后立刻删掉；
- *   4) 重启后要抓取新的激活地址（0.1.5 起鉴权 cookie 按本次激活签名）；
+ *   4) 交换后旧部署要留成回滚点，并可按需一键清理（只删非当前版本）；
  *   5) 跨版本破坏性变更提示与 release notes 链接。
  *
- * 其中 2/3/4 是「真跑」：生成 PowerShell 脚本并在临时目录里执行，断言交换结果。
+ * 其中 2/3 是「真跑」：生成 PowerShell 脚本并在临时目录里执行，断言交换结果。
  */
 import { strict as assert } from 'node:assert'
 import { spawnSync } from 'node:child_process'
@@ -262,6 +262,7 @@ try {
       '/dsh-updater-npm/repair',
       '/dsh-updater-npm/restart',
       '/dsh-updater-npm/cleanup',
+      '/dsh-updater-npm/cleanup-rollback',
       '/dsh-updater-npm/progress',
     ]) {
       assert.ok(paths.includes(p), 'missing route ' + p)
@@ -634,6 +635,65 @@ check('端到端：launchRestartScript + 交换脚本 → 部署真的被换掉'
   assert.equal(version, '0.1.5-rc.1', '交换没发生：脚本很可能又没被真正执行')
   assert.equal(JSON.parse(readFileSync(resultFile, 'utf8')).swapOk, true, '结果文件没有记录 swapOk')
   rmSync(work, { recursive: true, force: true })
+})
+
+// ── 12. 回滚点（新版跑起来后可一键清理）─────────────────────────────────────
+section('12) 回滚点扫描与清理')
+check('只把「版本与当前不同」的 .old-* 当回滚点，并且绝不动现役部署', () => {
+  const work = mkdtempSync(join(tmpdir(), 'dsh-rb-'))
+  const scope = join(work, '@deepseek-ai')
+  const live = join(scope, 'dsh')
+  const oldOther = join(scope, 'dsh.old-20260918193134')
+  const oldSame = join(scope, 'dsh.old-20260919100000')
+  const notATimestamp = join(scope, 'dsh.old-notatimestamp')
+  const otherPkg = join(scope, 'dsh-tools')
+  mkdirSync(live, { recursive: true })
+  writeFileSync(join(live, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh', version: '0.1.5-rc.2' }))
+  for (const [dir, version] of [[oldOther, '0.1.5-rc.1'], [oldSame, '0.1.5-rc.2']]) {
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh', version }))
+    writeFileSync(join(dir, 'lib.bin'), 'x')
+  }
+  mkdirSync(notATimestamp, { recursive: true })
+  mkdirSync(otherPkg, { recursive: true })
+
+  const dirs = t.listRollbackDirs(live, '0.1.5-rc.2')
+  assert.equal(dirs.length, 1, '列出了不该列的：' + dirs.map((d) => d.name).join(','))
+  assert.equal(dirs[0].name, 'dsh.old-20260918193134')
+  assert.equal(dirs[0].version, '0.1.5-rc.1')
+  assert.ok(dirs[0].bytes > 0, '体积没算出来')
+  const sum = t.summarizeRollbackDirs(live, '0.1.5-rc.2')
+  assert.equal(sum.count, 1)
+  assert.ok(sum.bytes > 0)
+
+  const swept = t.removeRollbackDirs(live, '0.1.5-rc.2')
+  assert.equal(swept.files, 1, '应该只删 1 个回滚点')
+  assert.equal(existsSync(oldOther), false, '回滚点没被删掉')
+  assert.equal(existsSync(oldSame), true, '与当前版本相同的 old 不该被删')
+  assert.equal(existsSync(live), true, '现役部署绝不能被删')
+  assert.equal(existsSync(otherPkg), true, '别的包不能被牵连')
+  assert.equal(t.summarizeRollbackDirs(live, '0.1.5-rc.2'), null, '删完应该没有回滚点了')
+  rmSync(work, { recursive: true, force: true })
+})
+check('回滚点清理路由做同源保护', async () => {
+  const routes = []
+  const ctx = {
+    get: () => undefined,
+    on: () => {},
+    effect: (fn) => { fn(); return () => {} },
+    inject: (deps, fn) => { fn(ctx) },
+    timer: { interval: () => () => {}, timeout: async () => {} },
+    webServer: { register: (r) => { routes.push(r); return () => {} } },
+  }
+  mod.apply(ctx)
+  const route = routes.find((r) => r.path === '/dsh-updater-npm/cleanup-rollback')
+  assert.ok(route !== undefined, 'cleanup-rollback route missing')
+  const rec = {}
+  route.handler({ method: 'POST', headers: { origin: 'http://evil.example', host: '127.0.0.1:3080' } }, {
+    writeHead: (code) => { rec.code = code },
+    end: (body) => { rec.body = body },
+  })
+  assert.equal(rec.code, 403, '跨源 POST 必须被拒')
 })
 
 await chain
