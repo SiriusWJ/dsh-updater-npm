@@ -40,6 +40,7 @@ window.__ModuleLoader__.load({
       updating: "正在通过 npm 更新…（可能需要 1-3 分钟）",
       updated: "✅ 已更新: v{from} → v{to}",
       stagedReady: "✅ 新版 v{version} 已就绪（暂存完成，尚未生效）——点击下方「重启 DSH」完成更新",
+      pendingSwapReady: "✅ 新版 v{version} 已暂存待交换（上一次重启没有完成交换）——点下方「重启 DSH」即可生效",
       restartHint: "⚠️ 新版本已安装，重启 DSH 后生效",
       noUpdate: "已是最新，无需更新",
       updateFail: "更新失败: ",
@@ -175,6 +176,7 @@ window.__ModuleLoader__.load({
       updating: "Updating via npm… (may take 1-3 minutes)",
       updated: "✅ Updated: v{from} → v{to}",
       stagedReady: "✅ v{version} staged and ready (not live yet) — click \"Restart DSH\" below to finish",
+      pendingSwapReady: "✅ v{version} is staged and waiting to be swapped (the previous restart did not complete it) — click \"Restart DSH\" below to apply",
       restartHint: "⚠️ New version installed — restart DSH to apply",
       noUpdate: "Already up to date, nothing to update",
       updateFail: "Update failed: ",
@@ -817,9 +819,19 @@ window.__ModuleLoader__.load({
         var pluginOutdated = !!(data && data.ok && data.plugin && data.plugin.hasUpdate)
         var sourceMode = !!(data && data.ok && data.mode === "source")
         var git = data && data.ok ? data.git : null
-        // 需要重启的时机：更新完成（含 Windows staged / 源码树 / 非 Windows npm）或部署修复完成
+        // 需要重启的时机：更新完成（含 Windows staged / 源码树 / 非 Windows npm）或部署修复完成，
+        // 或者宿主端报告「已暂存但还没交换」——上次重启没成功时，按钮必须还在。
+        var pendingSwap = data && data.ok ? data.pendingSwap : null
         var restartReady = (update !== null && update.phase === "done" && update.result && update.result.ok && update.result.needsRestart === true)
           || (repair !== null && repair.phase === "done" && repair.result && repair.result.ok && repair.result.needsRestart === true)
+          || !!pendingSwap
+
+        // 已暂存待交换（例如上次重启脚本没跑成）：即使页面刚打开也要能看到并重试
+        var pendingLine = pendingSwap
+          ? el("div", null,
+              el("div", { style: okStyle }, t("pendingSwapReady", { version: pendingSwap.version || "?" })),
+              el("div", { style: Object.assign({ marginTop: 4 }, warnStyle) }, t("restartHint")))
+          : null
 
         var pwshLine = null
         if (pwshInstall !== null) {
@@ -911,6 +923,7 @@ window.__ModuleLoader__.load({
             el("div", { style: { marginTop: 4, opacity: 0.85 } }, t("pluginBlocked"))) : null,
           updateLine,
           logPanel,
+          pendingLine,
           restartReady ? el("div", { style: { display: "flex", gap: 8, marginTop: 8, alignItems: "center", flexWrap: "wrap" } },
             el("button", { style: primaryBtnStyle, onClick: runRestart, disabled: restart !== null && restart.phase === "running" },
               restart !== null && restart.phase === "running" ? t("restarting") : t("restartBtn")),

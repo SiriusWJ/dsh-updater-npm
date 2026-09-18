@@ -555,6 +555,70 @@ check('client.js 可加载，factory 与其 apply() 都能跑（注册 settings.
   delete globalThis.window
 })
 
+// ── 11. 重启启动路径（1.12.2：detached powershell 是静默假成功）────────────────
+section('11) 重启启动路径')
+check('launchRestartScript 真的把脚本跑起来了（不是静默假成功）', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-launch-'))
+  const marker = join(dir, 'launched.txt')
+  const win = process.platform === 'win32'
+  const body = win
+    ? "'launched' | Set-Content -Path '" + marker + "'"
+    : "'launched' > '" + marker + "'"
+  const logFile = join(dir, 'restart.log')
+  const launched = t.launchRestartScript(body, logFile)
+  assert.equal(launched.ok, true, 'launch 失败: ' + String(launched.error || ''))
+  assert.ok(typeof launched.token === 'string' && launched.token.length > 0, '缺少本次启动的 token')
+  const started = await t.waitForBootstrap(logFile, launched.token, 8000)
+  assert.equal(started, true, '引导进程没有写出启动行（restart.log 缺失或没有 token）')
+  let seen = false
+  for (let i = 0; i < 40 && !seen; i += 1) {
+    seen = existsSync(marker)
+    if (!seen) await new Promise((r) => setTimeout(r, 200))
+  }
+  assert.equal(seen, true, '脚本根本没执行 —— 这正是「自带重启无效」的故障本体')
+  rmSync(dir, { recursive: true, force: true })
+})
+check('waitForBootstrap 对不存在的 token 返回 false（不会误报已启动）', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-launch2-'))
+  const logFile = join(dir, 'restart.log')
+  writeFileSync(logFile, 'node bootstrap started boot-1\n')
+  assert.equal(await t.waitForBootstrap(logFile, 'boot-999', 400), false)
+  assert.equal(await t.waitForBootstrap(logFile, 'boot-1', 400), true)
+  rmSync(dir, { recursive: true, force: true })
+})
+check('端到端：launchRestartScript + 交换脚本 → 部署真的被换掉', async () => {
+  const work = mkdtempSync(join(tmpdir(), 'dsh-e2e-'))
+  const live = join(work, 'live')
+  const stgRoot = join(work, 'stage')
+  const stgPkg = join(stgRoot, 'node_modules', '@deepseek-ai', 'dsh')
+  mkPkg(live, '0.1.2-rc.1')
+  mkdirSync(join(live, 'node_modules'), { recursive: true })
+  mkdirSync(stgPkg, { recursive: true })
+  mkPkg(stgPkg, '0.1.5-rc.1')
+  const logFile = join(work, 'restart.log')
+  const resultFile = join(work, 'restart-result.json')
+  const script = t.buildRestartScript({
+    platform: 'win32',
+    pid: 999999,
+    nodeExe: process.execPath,
+    args: ['-e', '0'],
+    cwd: work,
+    logFile,
+    swap: { installDir: live, stagingPkg: stgPkg, stagingDir: stgRoot, version: '0.1.5-rc.1' },
+    resultFile,
+  })
+  const launched = t.launchRestartScript(script, logFile)
+  assert.equal(launched.ok, true, 'launch 失败: ' + String(launched.error || ''))
+  let version = null
+  for (let i = 0; i < 60 && version !== '0.1.5-rc.1'; i += 1) {
+    await new Promise((r) => setTimeout(r, 500))
+    try { version = JSON.parse(readFileSync(join(live, 'package.json'), 'utf8')).version } catch (e) { version = null }
+  }
+  assert.equal(version, '0.1.5-rc.1', '交换没发生：脚本很可能又没被真正执行')
+  assert.equal(JSON.parse(readFileSync(resultFile, 'utf8')).swapOk, true, '结果文件没有记录 swapOk')
+  rmSync(work, { recursive: true, force: true })
+})
+
 await chain
 rmSync(root, { recursive: true, force: true })
 rmSync(sandboxHome, { recursive: true, force: true })

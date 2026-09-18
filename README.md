@@ -174,6 +174,28 @@ dsh plugin --profile web add github:SiriusWJ/dsh-updater-npm
 
 ## 更新日志
 
+### v1.12.2
+
+修掉「自带的重启无效，外部重启后仍是老版本」这条断链：staged 安装其实**成功**了
+（`verbose exit 0` / `info ok`），但重启这一步静默失败，交换永远没发生。
+
+- **根因（实测复现）**：`launchRestartScript` 用
+  `spawn('powershell.exe', […], { detached: true })` 启动脚本。Windows 上这等于
+  DETACHED_PROCESS——控制台程序会立刻以 `exit=0` 退出且**脚本一行都不执行**，
+  而 spawn 不抛错 → 静默假成功。A/B 实测：同一脚本换成 detached **node 引导**后正常执行。
+- **修复（严重）**：改为 detached 启动 `node` 引导进程，由引导以「普通子进程」方式
+  运行平台脚本；引导会把 `node bootstrap started <token>` 写进 `restart.log`。
+- **修复（严重）**：`restartNow` 现在**先确认脚本真的启动**（等到该 token 出现在
+  日志里，最多 5 秒）才交出暂存包。没启动就返回明确的失败文案，并**保留
+  `pending-swap.json` 与暂存目录**——旧版在这里直接删标记，导致 222 MB 的暂存包
+  随后被当成「遗留垃圾」清理，用户在外部重启后既没升级成功也再找不回暂存包。
+- **新增**：`/check` 返回 `pendingSwap`（已暂存待交换的版本），卡片会显示
+  「已暂存待交换」并**保留「重启 DSH」按钮**——外部重启后仍能一键补上交换；
+  若标记还在但暂存目录已丢，则自愈清掉僵尸标记。
+- 测试：新增 3 项（共 54 项）——**真跑** `launchRestartScript` 验证脚本确实被执行、
+  `waitForBootstrap` 不误报，以及「启动器 + 交换脚本」的端到端交换（假部署上真换目录）。
+  旧代码在这一项上必然失败，这正是它此前能骗过 36 项测试的原因。
+
 ### v1.12.1
 
 修掉 1.12.0 引入的**新误杀**（18:59:45 那次实测：staged 安装跑了整 5 分钟被自己的看门狗
