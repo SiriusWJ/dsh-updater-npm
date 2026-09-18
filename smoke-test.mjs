@@ -84,6 +84,8 @@ if (process.platform === 'win32') {
   })
   check('quoteWinArg 给含空格参数补引号', t.quoteWinArg('C:\\Users\\a b\\s') === '"C:\\Users\\a b\\s"')
   check('quoteWinArg 不动普通参数', t.quoteWinArg('install') === 'install')
+  check('不借 shell 时不改动参数（POSIX 一律不走 shell）',
+    t.shellArgv(['a b', 'install'], false).join('|') === 'a b|install')
   const out = await run(t.shellArgv(argv, true))
   check('转义后含空格参数完整传给 npm', !/Unknown command/i.test(out), out.trim().slice(0, 120))
 }
