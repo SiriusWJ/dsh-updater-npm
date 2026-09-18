@@ -33,11 +33,11 @@ dsh plugin --profile web add github:SiriusWJ/dsh-updater-npm
 
 - 自动检查每 30 分钟一次（页面每 60 秒刷新缓存结果）。
 - 检测到新版本时，设置页左侧导航「DSH 更新」旁会显示一个**红色小圆点**（🔴）。
-- 点击「通过 npm 更新」执行 `npm install -g @deepseek-ai/dsh@latest`，期间显示**实时进度**，
-  并附一个**可滚动的运行日志面板**（完整 npm 输出逐行滚动、自动贴底、可暂停自动滚动、
-  一键复制、可折叠；行数上限 800 行 / 128 KB，超出只裁最旧的行）。
-  **失败后日志仍留在界面上**，用于事后定位。
+- 点击「通过 npm 更新」执行 `npm install -g @deepseek-ai/dsh@latest`，期间显示**实时进度**
+  （进度条 + 最近几行 npm 输出尾部）。**没有滚动日志面板**——npm 的完整输出会留痕到
+  `$DSH_HOME/plugin-data/dsh-updater-npm/last-run.log`，需要排查时看文件即可，界面保持清爽。
 - 更新完成后出现**「重启 DSH」按钮**——点击后按原启动命令自动退出并重新拉起（**跨平台**：Windows 用 PowerShell，macOS/Linux 用 `/bin/sh`；源码树更新与部署修复完成后同样提供该按钮）。
+  **重启后不需要手动打开新的激活地址**：浏览器会自行重新鉴权，不会弹出新窗口。
 - 版本比较为 semver 风格：本地比远端新（如 rc.7 vs rc.6）时不会误报更新。
 
 ### 超时策略与运行日志（v1.12 起）
@@ -173,6 +173,19 @@ dsh plugin --profile web add github:SiriusWJ/dsh-updater-npm
 - `GET  /dsh-updater-npm/docs/read?path=&section=` —— 读取文档
 
 ## 更新日志
+
+### v1.12.3
+
+按使用反馈做减法：
+
+- **移除**：重启脚本里「抓取新激活地址 + 自动打开浏览器」的整套逻辑（Windows 与 POSIX
+  两个分支），重启后不再需要用户去打开新地址；顺带去掉脚本尾部那段最长 2 分钟的空转轮询。
+- **移除**：**运行日志滚动面板**——npm 的完整输出改为留痕到
+  `plugin-data/dsh-updater-npm/last-run.log`（操作结束即落盘，含 `[watchdog]`/`[exit]` 等
+  关键行），界面只保留进度条与几行输出尾部。`/progress` 载荷不再携带 `log` / `limits`，
+  轮询开销回到最小。
+- 保留：`--loglevel=http`（这是看门狗的真实心跳，不是装饰）、三路活动探针、空闲/硬双阈值超时。
+- 测试：改为断言「脚本里不含 token 抓取 / 不弹浏览器」，并新增 `last-run.log` 落盘断言（共 56 项）。
 
 ### v1.12.2
 

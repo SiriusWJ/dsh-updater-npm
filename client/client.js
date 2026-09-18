@@ -81,8 +81,6 @@ window.__ModuleLoader__.load({
     lastRestartOk: "上次重启：已交换并启动 v{version}",
     lastRestartFail: "上次重启：交换失败，已自动回滚到原部署",
     lastRestartPlain: "上次重启：仅重启，未交换版本",
-    activationHint: "新激活地址（浏览器需用它重新授权）",
-    openBtn: "打开",
     backupCreated: "升级前配置已备份到 {dir}",
     backupSessionsCopied: "会话日志已一并备份（{mb} MB）",
     backupSessionsSkipped: "会话日志过大（{mb} MB）未备份",
@@ -118,16 +116,7 @@ window.__ModuleLoader__.load({
       recheck: "重新检查",
       checkingShort: "检查中…",
       starting: "正在启动更新…",
-      waiting: "正在下载/安装，请稍候…（npm 输出将实时显示在下）",
-      logTitle: "运行日志",
-      logLines: "{n} 行",
-      logLimits: "空闲超时 {idle} 分钟 · 总时长上限 {timeout} 分钟",
-      logAutoScroll: "自动滚动",
-      logCollapse: "收起日志",
-      logExpand: "展开日志",
-      logCopy: "复制日志",
-      logCopied: "已复制",
-      logTruncated: "较早的 {n} 行已裁剪（只保留最近输出）",
+      waiting: "正在下载/安装，请稍候…",
       updNote: "自动检查每 30 分钟一次（页面每 60 秒刷新缓存结果）；npm 全局模式更新执行 npm install -g @deepseek-ai/dsh@latest，完成后需重启 DSH 生效；源码树模式请用 git pull 更新。「更新说明」在新标签页打开 GitHub Releases。",
       docsTitle: "DSH 文档（官方）",
       docsToggleLabel: "自动同步官方文档",
@@ -217,8 +206,6 @@ window.__ModuleLoader__.load({
     lastRestartOk: "Last restart: swapped and started v{version}",
     lastRestartFail: "Last restart: the swap failed and the previous deployment was restored",
     lastRestartPlain: "Last restart: restarted without swapping a version",
-    activationHint: "New activation URL (the browser must use it to re-authenticate)",
-    openBtn: "Open",
     backupCreated: "Pre-upgrade backup written to {dir}",
     backupSessionsCopied: "Session logs backed up too ({mb} MB)",
     backupSessionsSkipped: "Session logs were too large ({mb} MB) and were not backed up",
@@ -254,16 +241,7 @@ window.__ModuleLoader__.load({
       recheck: "Re-check",
       checkingShort: "Checking…",
       starting: "Starting update…",
-      waiting: "Downloading / installing, please wait… (npm output streams below in real time)",
-      logTitle: "Run log",
-      logLines: "{n} lines",
-      logLimits: "idle timeout {idle} min · total limit {timeout} min",
-      logAutoScroll: "Auto-scroll",
-      logCollapse: "Collapse log",
-      logExpand: "Expand log",
-      logCopy: "Copy log",
-      logCopied: "Copied",
-      logTruncated: "{n} earlier line(s) trimmed (only recent output is kept)",
+      waiting: "Downloading / installing, please wait…",
       updNote: "Auto-checks every 30 minutes (page refreshes the cached result every 60s); npm-global mode runs npm install -g @deepseek-ai/dsh@latest, then restart DSH to apply; source-tree mode: use git pull. \"Release notes\" opens GitHub Releases in a new tab.",
       docsTitle: "DSH Docs (official)",
       docsToggleLabel: "Auto-sync official docs",
@@ -342,19 +320,6 @@ window.__ModuleLoader__.load({
       fontSize: 12, fontWeight: 600,
     }
     var noteStyle = { opacity: 0.6, fontSize: 12, marginTop: 4 }
-    // 运行日志面板（1.12）
-    var logWrapStyle = {
-      marginTop: 8, border: "1px solid rgba(128,128,128,.28)", borderRadius: 8, overflow: "hidden",
-    }
-    var logBodyStyle = {
-      maxHeight: 220, overflow: "auto", background: "rgba(128,128,128,.06)",
-      borderTop: "1px solid rgba(128,128,128,.22)",
-    }
-    var logPreStyle = {
-      margin: 0, padding: "6px 8px", whiteSpace: "pre-wrap", wordBreak: "break-all",
-      fontFamily: "ui-monospace,SFMono-Regular,Menlo,Consolas,monospace",
-      fontSize: 11, lineHeight: 1.45, opacity: 0.9,
-    }
     var inputStyle = {
       padding: "4px 8px", borderRadius: 6, border: "1px solid rgba(128,128,128,.4)",
       background: "transparent", color: "inherit", fontSize: 12, flex: 1, minWidth: 120,
@@ -410,9 +375,8 @@ window.__ModuleLoader__.load({
         return fetch("/dsh-updater-npm/update?uilang=" + uiLang(), { method: "POST", cache: "no-store", signal: AbortSignal.timeout(600000) })
           .then(function (r) { return r.json() })
       }
-      var callProgress = function (since) {
-        var cursor = typeof since === "number" && since > 0 ? since : 0
-        return fetch("/dsh-updater-npm/progress?since=" + cursor, { cache: "no-store", signal: AbortSignal.timeout(10000) })
+      var callProgress = function () {
+        return fetch("/dsh-updater-npm/progress", { cache: "no-store", signal: AbortSignal.timeout(10000) })
           .then(function (r) { return r.json() })
       }
       var RELEASES_URL = "https://github.com/deepseek-ai/DeepSeek-Harness/releases"
@@ -459,67 +423,6 @@ window.__ModuleLoader__.load({
         var copied = cp0[0]
         var setCopied = cp0[1]
 
-        // ── 运行日志滚动面板（1.12）─────────────────────────────────────────
-        // 宿主把子进程输出按行留痕，客户端用行号游标增量拉取。失败后日志仍然保留，
-        // 供事后定位（旧版失败时进度区被清空，只剩一行「暂存安装失败」）。
-        var logSeq = react.useRef(0)
-        var log0 = react.useState({ lines: [], dropped: 0, limits: null })
-        var log = log0[0]
-        var setLog = log0[1]
-        var logBox = react.useRef(null)
-        var auto0 = react.useState(true)
-        var autoScroll = auto0[0]
-        var setAutoScroll = auto0[1]
-        var open0 = react.useState(true)
-        var logOpen = open0[0]
-        var setLogOpen = open0[1]
-
-        // 每次新操作开始：游标归零、面板清空并重新展开
-        var resetLog = function () {
-          logSeq.current = 0
-          setLog({ lines: [], dropped: 0, limits: null })
-          setLogOpen(true)
-          setAutoScroll(true)
-        }
-
-        var absorbLog = function (p) {
-          if (!p || !p.log) return
-          if (typeof p.log.total === "number") logSeq.current = p.log.total
-          var incoming = p.log.lines || []
-          setLog(function (prev) {
-            var merged = incoming.length > 0 ? prev.lines.concat(incoming) : prev.lines
-            if (merged.length > 2000) merged = merged.slice(merged.length - 2000)
-            return {
-              lines: merged,
-              dropped: typeof p.log.dropped === "number" ? p.log.dropped : prev.dropped,
-              limits: p.limits
-                ? { npmIdleMinutes: p.limits.npmIdleMinutes, npmTimeoutMinutes: p.limits.npmTimeoutMinutes }
-                : prev.limits
-            }
-          })
-        }
-
-        // 拉增量：游标之外只取新行（轮询不重传整份日志）
-        var pollLog = function () {
-          return callProgress(logSeq.current).then(function (p) {
-            absorbLog(p)
-            return p
-          }).catch(function () { return null })
-        }
-
-        // 自动滚动：默认贴底；用户手动往上滚就停住，滚回底部自动恢复
-        react.useEffect(function () {
-          var box = logBox.current
-          if (!box || !autoScroll || !logOpen) return
-          box.scrollTop = box.scrollHeight
-        }, [log.lines.length, autoScroll, logOpen])
-
-        var onLogScroll = function (e) {
-          var box = e.currentTarget
-          var atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 24
-          if (atBottom !== autoScroll) setAutoScroll(atBottom)
-        }
-
         var applyData = function (data) {
           applyHasUpdate(data)
         }
@@ -543,39 +446,36 @@ window.__ModuleLoader__.load({
 
         var runUpdate = function () {
           setUpdate({ phase: "running", result: null })
-          resetLog()
           setProg({ type: "update", phase: "starting", message: t("starting"), detail: "", done: 0, total: 0, current: "", startedAt: Date.now() })
           var stopPoll = null
           if (timer !== undefined) {
             stopPoll = timer.interval(function () {
-              pollLog().then(function (p) {
+              callProgress().then(function (p) {
                 if (p && p.type === "update" && p.phase !== "idle") setProg(p)
-              })
+              }).catch(function () { /* 静默 */ })
             }, 1500)
           }
           callUpdate().then(function (result) {
             if (stopPoll) stopPoll()
             setUpdate({ phase: "done", result: result })
             setProg(null)
-            pollLog().then(function () { runCheck() })
+            runCheck()
           }).catch(function (error) {
             if (stopPoll) stopPoll()
             setUpdate({ phase: "done", result: { ok: false, error: String((error && error.message) || error) } })
             setProg(null)
-            pollLog()
           })
         }
 
         var runSourceUpdate = function () {
           setUpdate({ phase: "running", result: null })
-          resetLog()
           setProg({ type: "source-update", phase: "starting", message: t("srcUpdating"), detail: "", done: 0, total: 0, current: "", startedAt: Date.now() })
           var stopPoll = null
           if (timer !== undefined) {
             stopPoll = timer.interval(function () {
-              pollLog().then(function (p) {
+              callProgress().then(function (p) {
                 if (p && p.type === "source-update" && p.phase !== "idle") setProg(p)
-              })
+              }).catch(function () { /* 静默 */ })
             }, 1500)
           }
           fetch("/dsh-updater-npm/update-source?uilang=" + uiLang(), { method: "POST", cache: "no-store", signal: AbortSignal.timeout(600000) })
@@ -584,24 +484,22 @@ window.__ModuleLoader__.load({
               if (stopPoll) stopPoll()
               setUpdate({ phase: "done", result: result })
               setProg(null)
-              pollLog().then(function () { runCheck() })
+              runCheck()
             }).catch(function (error) {
               if (stopPoll) stopPoll()
               setUpdate({ phase: "done", result: { ok: false, error: String((error && error.message) || error) } })
               setProg(null)
-              pollLog()
             })
         }
 
         var runInstallPwsh = function () {
-          resetLog()
           setPwshInstall({ phase: "running", result: null, prog: { type: "install-pwsh", phase: "starting", message: t("pwshInstalling"), detail: "", startedAt: Date.now() } })
           var stopPoll = null
           if (timer !== undefined) {
             stopPoll = timer.interval(function () {
-              pollLog().then(function (p) {
+              callProgress().then(function (p) {
                 if (p && p.type === "install-pwsh" && p.phase !== "idle") setPwshInstall({ phase: "running", result: null, prog: p })
-              })
+              }).catch(function () { /* 静默 */ })
             }, 1500)
           }
           fetch("/dsh-updater-npm/install-pwsh?uilang=" + uiLang(), { method: "POST", cache: "no-store", signal: AbortSignal.timeout(600000) })
@@ -609,34 +507,19 @@ window.__ModuleLoader__.load({
             .then(function (result) {
               if (stopPoll) stopPoll()
               setPwshInstall({ phase: "done", result: result, prog: null })
-              pollLog().then(function () { runCheck() })
+              runCheck()
             }).catch(function (error) {
               if (stopPoll) stopPoll()
               setPwshInstall({ phase: "done", result: { ok: false, error: String((error && error.message) || error) }, prog: null })
-              pollLog()
             })
         }
 
         var runRepair = function () {
           setRepair({ phase: "running", result: null })
-          resetLog()
-          var stopPoll = null
-          if (timer !== undefined) {
-            // 修复同样走 npm staged 安装（可能十几分钟）：只吸收日志，不动 update 卡片进度
-            stopPoll = timer.interval(function () { pollLog() }, 1500)
-          }
           fetch("/dsh-updater-npm/repair?uilang=" + uiLang(), { method: "POST", cache: "no-store", signal: AbortSignal.timeout(600000) })
             .then(function (r) { return r.json() })
-            .then(function (result) {
-              if (stopPoll) stopPoll()
-              setRepair({ phase: "done", result: result })
-              pollLog()
-            })
-            .catch(function (error) {
-              if (stopPoll) stopPoll()
-              setRepair({ phase: "done", result: { ok: false, error: String((error && error.message) || error) } })
-              pollLog()
-            })
+            .then(function (result) { setRepair({ phase: "done", result: result }) })
+            .catch(function (error) { setRepair({ phase: "done", result: { ok: false, error: String((error && error.message) || error) } }) })
         }
 
         var runRestart = function () {
@@ -792,27 +675,6 @@ window.__ModuleLoader__.load({
           }
         }
 
-        // ── 运行日志面板：有输出就显示（更新/修复/源码更新/PowerShell 安装共用）──
-        var logText = log.lines.join("\n")
-        var logPanel = log.lines.length === 0 ? null : el("div", { style: logWrapStyle },
-          el("div", { style: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", padding: "4px 8px", background: "rgba(128,128,128,.10)", fontSize: 12 } },
-            el("span", { style: { fontWeight: 600 } }, t("logTitle")),
-            el("span", { style: { opacity: 0.7 } }, t("logLines", { n: log.lines.length })),
-            log.limits && log.limits.npmIdleMinutes
-              ? el("span", { style: { opacity: 0.7 } }, t("logLimits", { idle: log.limits.npmIdleMinutes, timeout: log.limits.npmTimeoutMinutes }))
-              : null,
-            el("span", { style: { flex: 1 } }),
-            el("label", { style: { display: "flex", gap: 4, alignItems: "center", cursor: "pointer" } },
-              el("input", { type: "checkbox", checked: autoScroll, onChange: function (e) { setAutoScroll(e.target.checked) } }),
-              t("logAutoScroll")),
-            el("button", { style: btnStyle, onClick: function () { setLogOpen(!logOpen) } }, logOpen ? t("logCollapse") : t("logExpand")),
-            canCopy ? el("button", { style: btnStyle, onClick: function () { copyCmd(logText) } }, copied === logText ? t("logCopied") : t("logCopy")) : null),
-          logOpen ? el("div", { ref: logBox, onScroll: onLogScroll, style: logBodyStyle },
-            log.dropped > 0
-              ? el("div", { style: { padding: "4px 8px", fontSize: 11, opacity: 0.6 } }, t("logTruncated", { n: log.dropped }))
-              : null,
-            el("pre", { style: logPreStyle }, logText)) : null)
-
         var data = state.data
         var busy = update !== null && update.phase === "running"
         // 插件自身过旧时禁止「通过 npm 更新」：这一步由旧插件代码执行，有风险
@@ -896,10 +758,7 @@ window.__ModuleLoader__.load({
             el("div", { style: data.lastRestart.swapped && !data.lastRestart.swapOk ? errStyle : okStyle },
               data.lastRestart.swapped
                 ? (data.lastRestart.swapOk ? t("lastRestartOk", { version: data.lastRestart.version || "?" }) : t("lastRestartFail"))
-                : t("lastRestartPlain")),
-            data.lastRestart.url ? el("div", { style: { marginTop: 2, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" } },
-              el("span", { style: { opacity: 0.75 } }, t("activationHint")),
-              linkOut(data.lastRestart.url, t("openBtn"))) : null) : null,
+                : t("lastRestartPlain"))) : null,
           data && data.ok && data.stagingWaste ? el("div", { style: { marginTop: 5, fontSize: 12, color: "#b26a00" } },
             "⚠️ " + t("stagingWasteFound", { n: data.stagingWaste.count, mb: fmtMb(data.stagingWaste.bytes) })) : null,
           data && data.ok && data.npmResiduals ? el("div", { style: { marginTop: 5, fontSize: 12, color: "#b26a00" } },
@@ -922,7 +781,6 @@ window.__ModuleLoader__.load({
                 copied === data.plugin.updateCommand ? t("copied") : t("copyBtn")) : null),
             el("div", { style: { marginTop: 4, opacity: 0.85 } }, t("pluginBlocked"))) : null,
           updateLine,
-          logPanel,
           pendingLine,
           restartReady ? el("div", { style: { display: "flex", gap: 8, marginTop: 8, alignItems: "center", flexWrap: "wrap" } },
             el("button", { style: primaryBtnStyle, onClick: runRestart, disabled: restart !== null && restart.phase === "running" },

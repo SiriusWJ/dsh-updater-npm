@@ -109,7 +109,6 @@ const swapArgs = {
   resultFile: join(root, 'restart-result.json'),
   outLog: join(root, 'out.log'),
   errLog: join(root, 'err.log'),
-  urlFile: join(root, 'activation-url.txt'),
 }
 const winScript = t.buildRestartScript(swapArgs)
 check('包含结构一致性守卫', () => assert.ok(winScript.includes('staging layout mismatch'), 'missing layout guard'))
@@ -122,9 +121,15 @@ check('旧部署保留为回滚点（不再 Remove-Item $old）', () => {
   assert.ok(!/Remove-Item[^\n]*\$old[^\n]*Recurse/.test(winScript), 'must not delete the rollback point')
 })
 check('新进程输出重定向', () => assert.ok(winScript.includes('-RedirectStandardOutput'), 'missing stdout redirect'))
-check('抓取新激活地址并打开浏览器', () => {
-  assert.ok(winScript.includes('token='), 'missing token pattern')
-  assert.ok(winScript.includes('Start-Process $url'), 'missing browser open')
+check('不再抓取/弹出激活地址（1.12.3 按用户要求移除）', () => {
+  assert.ok(!winScript.includes('token='), '脚本里还有 token 抓取')
+  assert.ok(!winScript.includes('Start-Process $url'), '脚本还会弹浏览器')
+  assert.ok(!winScript.includes('activation url'), '脚本还有激活地址日志')
+})
+check('POSIX 分支同样不再抓取激活地址', () => {
+  const shScript = t.buildRestartScript({ ...swapArgs, platform: 'linux' })
+  assert.ok(!shScript.includes('token='), 'POSIX 脚本里还有 token 抓取')
+  assert.ok(!shScript.includes('xdg-open'), 'POSIX 脚本还会弹浏览器')
 })
 check('写回机器可读的重启结果', () => assert.ok(winScript.includes('ConvertTo-Json'), 'missing result json'))
 check('生成的 PowerShell 能被解析器接受', () => {
@@ -485,7 +490,7 @@ check('日志有界：超过上限后裁掉最旧的行，游标仍连续', () =
   assert.equal(snap.total, snap.dropped + snap.lines.length)
   assert.equal(snap.lines[snap.lines.length - 1], 'line-899')
 })
-check('/progress 载荷带日志增量与超时设置', async () => {
+check('/progress 载荷只回传进度（日志面板已移除，不再传 log/limits）', async () => {
   const routes = []
   const ctx = {
     get: () => undefined,
@@ -508,9 +513,21 @@ check('/progress 载荷带日志增量与超时设置', async () => {
   for (let i = 0; i < 40 && rec.body === undefined; i += 1) await new Promise((r) => setTimeout(r, 25))
   assert.ok(rec.body !== undefined, 'progress handler did not respond')
   const body = JSON.parse(rec.body)
-  assert.deepEqual(body.log.lines, ['hello progress'])
-  assert.equal(typeof body.log.total, 'number')
-  assert.equal(typeof body.limits.npmIdleMinutes, 'number')
+  // 1.12.3：日志面板已移除，载荷不再携带 log/limits（轮询回到只传进度本身）
+  assert.ok(!('log' in body), '载荷里还有 log（面板已移除，不该再传）')
+  assert.ok(!('limits' in body), '载荷里还有 limits')
+  assert.ok('phase' in body && 'updatedAt' in body, '进度字段缺失')
+})
+check('运行日志落盘：操作结束写 last-run.log（面板没了但失败要能查）', () => {
+  t.opLogReset()
+  t.opLogNote('line-a')
+  t.opLogNote('line-b')
+  t.opLogDump('update error 测试')
+  const file = join(sandboxHome, 'plugin-data', 'dsh-updater-npm', 'last-run.log')
+  assert.ok(existsSync(file), 'last-run.log 没有生成')
+  const text = readFileSync(file, 'utf8')
+  assert.ok(text.includes('line-a') && text.includes('line-b'), '日志内容没写进去')
+  assert.ok(text.includes('update error 测试'), '没有写明原因')
 })
 
 // ── 10. 客户端 bundle 装载（日志面板所在文件必须能被加载并挂载）─────────────
